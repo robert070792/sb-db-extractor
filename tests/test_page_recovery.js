@@ -13,12 +13,12 @@ test('a failed actual button recovery cannot report success',async()=>{
   e.api.override({scrollFooter:async()=>{},scrollTop:async()=>{},inspectPager:async()=>({domCurrent:2}),clickPage:async()=>({ok:false})});
   await assert.rejects(()=>e.api.recoverPricePage(j,1,'test',2,1,'original'),/버튼을 찾지/);
 });
-test('page failure preserves preceding products and records a partial result',async()=>{
+test('page failure preserves preceding products and waits before business lookup',async()=>{
   const e=await runtime(),j=e.api.setJob();
   const collection={searchUrl:'https://search.shopping.naver.com/search/all?query=test',from:1,to:2,nextPage:2,products:[item()]};
   const state=e.api.setState({collection});
   e.api.override({navigatePrice:async()=>{throw Error('Synthetic product change failed');}});
-  await e.api.collectPrice(j,collection,'test');
+  await assert.rejects(()=>e.api.collectPrice(j,collection,'test'),e=>e.code==='PAGE_WAIT');
   assert.equal(state.incompletePages.length,1);assert.match(state.incompletePages[0],/2페이지/);
-  assert.equal(collection.products.length,1);assert(state.logs.some(x=>x.includes('부분 완료')));
+  assert.equal(collection.products.length,1);assert.equal(collection.nextPage,2);assert.equal(collection.pageWait.page,2);assert(state.logs.some(x=>x.includes('확인 대기')));
 });

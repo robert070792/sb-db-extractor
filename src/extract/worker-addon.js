@@ -1,4 +1,4 @@
-/* 유승빈 DB추출기 v3.24: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
+/* 유승빈 DB추출기 v3.25: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
 (() => {
   'use strict';
   const KEY='sb_leads_v20_state'; // chrome.storage.local: 컴퓨터 + Chrome 프로필별, sync 사용 안 함
@@ -402,14 +402,17 @@
     let lifecycle=null;
     if(watch&&typeof performance!=='undefined'){
       const age=performance.now()-watch.started;
-      if(age>=0&&age<90000){
+      if(age>=0&&age<1800000){
         const responses=(performance.getEntriesByType?.('resource')||[]).filter(x=>x.startTime>=watch.started&&x.responseEnd>0).flatMap(x=>{
           try{const u=new URL(x.name);const page=Number(u.searchParams.get('pagingIndex'));
             if(u.origin!==location.origin||!/^\/(?:api\/)?search\//.test(u.pathname)||!Number.isInteger(page)||page<1||page>10)return [];
             return [{page,status:x.responseStatus||0,query:u.searchParams.get('query')||'',path:u.pathname}];
           }catch{return [];}
         }).slice(-10);
+        const monitor=window.__sbSearchNetwork325;
+        const requests=(monitor?.entries||[]).filter(x=>x.started>=watch.started).slice(-30).map(x=>({...x}));
         lifecycle={fromPage:watch.fromPage,targetPage:watch.targetPage,navigation:watch.navigation,ageMs:age,
+          requestMonitor:monitor?{fetch:monitor.fetch,xhr:monitor.xhr}:null,requests,
           productNodesAdded:watch.added,productNodesRemoved:watch.removed,organicAdded:watch.organicAdded,organicRemoved:watch.organicRemoved,quietMs:performance.now()-watch.lastMutation,responses};
       }
     }
@@ -476,6 +479,44 @@
     // 클릭 전에 실제 페이지 번호 링크 주소를 보존합니다. 클릭 후 SPA가 링크 DOM을 교체할 수 있습니다.
     const linkHref=String(chosen.el.href||chosen.el.getAttribute('href')||'');
     chosen.el.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});
+    // 검색 요청만 관측합니다. 추가 요청이나 응답 본문/쿠키/헤더 읽기는 하지 않습니다.
+    // fetch의 반환 Promise, XHR의 반환값과 예외는 원본 그대로 유지합니다.
+    if(!window.__sbSearchNetwork325){
+      const monitor={entries:[],fetch:false,xhr:false};
+      window.__sbSearchNetwork325=monitor;
+      const begin=(raw,transport)=>{
+        try{
+          const u=new URL(typeof raw==='string'?raw:raw?.url||String(raw),location.href),page=Number(u.searchParams.get('pagingIndex'));
+          if(u.origin!==location.origin||!/^\/(?:api\/)?search\//.test(u.pathname)||!Number.isInteger(page)||page<1||page>10)return null;
+          const entry={page,query:(u.searchParams.get('query')||'').slice(0,200),path:u.pathname,transport,started:performance.now(),state:'pending',status:0};
+          monitor.entries.push(entry);monitor.entries=monitor.entries.slice(-100);return entry;
+        }catch{return null;}
+      };
+      const finish=(entry,state,status=0)=>{try{if(entry){entry.state=state;entry.status=Number(status)||0;entry.elapsedMs=Math.round(performance.now()-entry.started);}}catch{}};
+      try{if(typeof window.fetch==='function'){
+        const original=window.fetch;
+        window.fetch=function(...args){
+          const entry=begin(args[0],'fetch');let result;
+          try{result=Reflect.apply(original,this,args);}catch(error){finish(entry,'error');throw error;}
+          if(entry)try{result.then(response=>{finish(entry,response.ok?'response':'http-error',response.status);},()=>{finish(entry,'error');});}catch{}
+          return result;
+        };monitor.fetch=true;
+      }}catch{}
+      try{if(window.XMLHttpRequest){
+        const proto=window.XMLHttpRequest.prototype,open=proto.open,send=proto.send,urls=new WeakMap();
+        proto.open=function(...args){const result=Reflect.apply(open,this,args);urls.set(this,args[1]);return result;};
+        proto.send=function(...args){
+          const entry=begin(urls.get(this),'xhr');
+          if(!entry)return Reflect.apply(send,this,args);
+          const xhr=this,failed=()=>finish(entry,'error'),aborted=()=>finish(entry,'aborted'),timedout=()=>finish(entry,'timeout');
+          const cleanup=()=>{for(const [name,fn] of events)xhr.removeEventListener(name,fn);};
+          const ended=()=>{if(entry.state==='pending')finish(entry,xhr.status>=200&&xhr.status<300?'complete':xhr.status?'http-error':'error',xhr.status);cleanup();};
+          const events=[['loadend',ended],['error',failed],['abort',aborted],['timeout',timedout]];
+          for(const [name,fn] of events)xhr.addEventListener(name,fn);
+          try{return Reflect.apply(send,this,args);}catch(error){finish(entry,'error');cleanup();throw error;}
+        };monitor.xhr=true;
+      }}catch{}
+    }
     // 제품 노드 교체만 관찰합니다. pgn 같은 추적 속성만 변경된 것은 상품 갱신 증거로 세지 않습니다.
     window.__sbPageWatch323?.observer?.disconnect();
     const clock=()=>typeof performance!=='undefined'?performance.now():Date.now();
@@ -873,6 +914,7 @@
     throw Error(`${keyword} 검색 결과 전환을 확인하지 못했습니다 (${last}). 검색 입력창과 돋보기 버튼을 확인하세요.`);
   }
   async function waitForPricePageChange(j,tabId,expectedPage,beforeSignature,beforePage,limitMs=15000){
+    j.lastPageTransition=null;
     const started=Date.now();let deadline=Date.now()+limitMs,lastState='',lastFingerprint='',stable=0;
     while(Date.now()<deadline){
       await waitIfPaused(j);await pause(660);assertActive(j);
@@ -882,7 +924,11 @@
         if(!j.paused){j.paused=true;state.paused=true;await patch(j,{paused:true,phase:'네이버 보안 인증 대기',stage:'현재 탭에서 직접 인증 후 이어하기를 누르세요.'});await log(j,'페이지 이동 중 보안 인증 감지 · 일시정지');}
         await waitIfPaused(j);deadline=Date.now()+limitMs;continue;
       }
-      if(!data?.records?.length)continue;
+      if(!data?.records?.length){
+        j.lastPageTransition={expectedPage,beforePage,actualPage:pager?.domCurrent??null,lifecycle:data?.lifecycle||null,
+          loading:!!data?.loading,before:typeof beforeSignature==='object'?beforeSignature:{signature:beforeSignature,requests:[]},after:pageEvidence(data),reason:'상품 로딩 미확인'};
+        continue;
+      }
       const target=expectedPage??pager.domCurrent;
       if(!Number.isInteger(target)||target===beforePage)continue;
       if(expectedPage===null&&((j.navigationDirection==='prev'&&target>=beforePage)||(j.navigationDirection==='next'&&target<=beforePage)))continue;
@@ -930,6 +976,13 @@
   }
   // URL 주소를 조작하지 않고 네이버의 실제 숫자 버튼을 한 번 더 이용하는 복구.
   // 2페이지 표시만 바뀌고 1페이지 상품이 남는 SPA 불일치가 발생한 경우에만 호출합니다.
+  async function checkpointPriceNavigation(j){
+    const c=state.collection,attempt=j.navigationAttempt;
+    if(!c||!attempt)return;
+    // 서비스 워커가 클릭 직후 종료돼도 선택 숫자만으로 성공 처리하지 않도록 먼저 저장합니다.
+    c.pageWait={...attempt,page:attempt.targetPage,label:`${attempt.keyword} ${attempt.targetPage}페이지 (수집 확인 대기)`,reason:'페이지 전환 확인 중',failedAt:null};
+    await save();assertActive(j);
+  }
   async function recoverPricePage(j,tabId,keyword,targetPage,fromPage,beforeSignature){
     await log(j,`${keyword} · 페이지 전환 근거가 부족해 실제 숫자 버튼으로 1회 복구 시도`);
     const current=await inspectPager(tabId);
@@ -952,10 +1005,11 @@
     }
     if(!baseline)throw Error(`${keyword} ${targetPage}페이지 복구 실패: ${fromPage}페이지 상품 로딩 완료를 확인하지 못했습니다.`);
     j.pageProof=null;
+    j.navigationAttempt={keyword,targetPage,fromPage,beforeEvidence:baseline};
+    await checkpointPriceNavigation(j);
     await scrollFooter(tabId);await pause(450);
     const forward=await clickPage(tabId,targetPage,fromPage);
     if(!forward?.ok||forward.clickedPage!==targetPage)throw Error(`${keyword} ${targetPage}페이지 복구 실패: 실제 페이지 번호 버튼을 누르지 못했습니다.`);
-    await scrollTop(tabId);
     return await waitForPricePageChange(j,tabId,targetPage,baseline,fromPage,18000);
   }
   async function navigatePrice(j,tabId,keyword,targetPage){
@@ -963,6 +1017,14 @@
     await ensureKeyword(j,tabId,keyword);
     let pager=await inspectPager(tabId),actual=pager?.domCurrent??null;
     await log(j,`${keyword} · 현재 페이지 ${actual??'미확인'} (실제 링크 ${pager?.domCurrent??'-'}, URL ${pager?.urlPage??'-'}) · 목표 ${targetPage}페이지`);
+    const waiting=state.collection?.pageWait;
+    if(waiting?.keyword===keyword&&waiting.page===targetPage&&actual===targetPage){
+      // 실패 때 바뀐 숫자/pgn만 보고 이어하기가 이전 상품을 확정하는 것을 방지합니다.
+      if(!waiting.beforeEvidence?.signature||waiting.fromPage===targetPage)throw Error('상품 변경 비교 기준이 없습니다. 실제 다른 페이지 버튼을 누른 뒤 이어하기를 누르세요.');
+      j.navigationAttempt={keyword,targetPage,fromPage:waiting.fromPage,beforeEvidence:waiting.beforeEvidence};
+      await waitForPricePageChange(j,tabId,targetPage,waiting.beforeEvidence,waiting.fromPage,6000);
+      return;
+    }
     // URL만 있어도 현재 페이지라고 바로 확정하지 않습니다. DOM에서 명시적 확인된 경우에만 바로 수집.
     if(pager?.domCurrent===targetPage){
       const currentData=await waitForProducts(j,tabId,targetPage);
@@ -980,6 +1042,8 @@
       assertActive(j);await waitIfPaused(j);
       const before=await inspect(tabId),signature=pageEvidence(before);
       j.pageProof=null;
+      j.navigationAttempt={keyword,targetPage,fromPage:actual,beforeEvidence:signature};
+      await checkpointPriceNavigation(j);
       await patch(j,{stage:`현재 ${actual??'미확인'}페이지 → ${targetPage}페이지 버튼 이동 중`});
       await scrollFooter(tabId);await pause(420);
       const clicked=await clickPage(tabId,targetPage,actual);
@@ -987,7 +1051,6 @@
       await log(j,`${keyword} · ${clicked.clickedPage??(clicked.navigation==='prev'?'이전':'다음')}페이지 버튼 클릭`);
       j.navigationDirection=clicked.navigation;
       let after;
-      await scrollTop(tabId);
       try{after=await waitForPricePageChange(j,tabId,clicked.clickedPage,signature,actual,15000);}
       catch(error){
         // 번호만 전환된 경우 실제 숫자 버튼으로 한 번만 복구한다. URL 재작성은 하지 않는다.
@@ -1150,30 +1213,35 @@
     state.auditPages=state.auditPages||[];state.auditPages.push(metrics);
     return metrics;
   }
+  async function holdPricePage(j,c,keyword,page,error){
+    assertActive(j);
+    const reason=str(error.message||error).slice(0,1000),label=`${keyword} ${page}페이지 (수집 확인 대기)`;
+    const attempt=j.navigationAttempt?.keyword===keyword&&j.navigationAttempt.targetPage===page?j.navigationAttempt:null;
+    c.nextPage=page;
+    c.pageWait={...(c.pageWait||{}),...(attempt||{}),keyword,page,reason,label,failedAt:Date.now()};
+    state.incompletePages=state.incompletePages||[];
+    if(!state.incompletePages.includes(label))state.incompletePages.push(label);
+    await save();
+    await log(j,`${keyword} ${page}페이지 확인 대기 · 기존 상품 ${c.products.length}개 보존 · 사업자조회는 전체 페이지 수집 후 시작. 원인: ${reason}`);
+    const held=Error(reason);held.code='PAGE_WAIT';throw held;
+  }
   async function collectPrice(j,c,keyword){
     let previousSignature=c.previousSignature||'';
     for(let p=c.nextPage;p<=c.to;p++){
       await waitIfPaused(j);
       await patch(j,{page:p,phase:`${keyword} · ${p}/${c.to}페이지`,stage:'페이지 준비 중'});
+      j.navigationAttempt=null;
       try{await navigatePrice(j,j.tabId,keyword,p);}
       catch(e){
         if(j.cancelled)throw e;
-        // 앞 페이지 수집에 성공했다면 상품·회사조회 결과 전체를 0건으로 버리지 않습니다.
-        // 실패 페이지는 수집한 것으로 간주하지 않고 반드시 부분 완료로 기록합니다.
-        if(!c.products.length)throw e;
-        state.incompletePages=state.incompletePages||[];
-        state.incompletePages.push(`${keyword} ${p}페이지 (페이지 전환 검증 실패)`);
-        c.nextPage=p;await save();
-        await log(j,`${keyword} ${p}페이지 이동 실패 · 이전 페이지까지 확인된 상품 ${c.products.length}개만 업체 조회로 진행합니다 (부분 완료). 원인: ${str(e.message||e).slice(0,200)}`);
-        break;
+        await holdPricePage(j,c,keyword,p,e);
       }
       const pageStartedAt=Date.now();
       let result;
       try{result=await loadScrollPage(j,j.tabId,p);}
       catch(e){
-        if(j.cancelled||!c.products.length)throw e;
-        state.incompletePages.push(`${keyword} ${p}페이지 (상품 수집 실패)`);
-        await log(j,`${keyword} ${p}페이지 수집 실패 · 이전 상품은 보존하고 부분 완료로 진행: ${str(e.message||e).slice(0,180)}`);await save();break;
+        if(j.cancelled)throw e;
+        await holdPricePage(j,c,keyword,p,e);
       }
       const sig=result.products.map(x=>x.mallSeq+':'+x.nvMid).sort().join('|');
       const repeatedPage=Boolean(previousSignature&&sig===previousSignature);
@@ -1184,9 +1252,7 @@
         const retry=await loadScrollPage(j,j.tabId,p);
         const retrySig=retry.products.map(x=>x.mallSeq+':'+x.nvMid).sort().join('|');
         if(retrySig===previousSignature){
-          state.incompletePages=state.incompletePages||[];state.incompletePages.push(`${keyword} ${p}페이지`);
-          await save();
-          throw Error(`${keyword} ${p}페이지 상품 목록이 이전 페이지와 같습니다. ${p}페이지를 수집했다고 표시할 수 없어 작업을 중단했습니다. 기존 수집기록은 보존됩니다.`);
+          await holdPricePage(j,c,keyword,p,Error(`${keyword} ${p}페이지 상품 목록이 이전 페이지와 같습니다. 실제 상품 갱신을 확인한 뒤 이어하기를 누르세요.`));
         }
         result.products=retry.products;result.ads=retry.ads;result.scan=retry.scan;
       }
@@ -1202,6 +1268,9 @@
       const newly=audit.added;
       if(c.products.length>MAX_ITEMS)throw Error(`상품 수집 한도 ${MAX_ITEMS}건을 초과했습니다. 페이지·키워드 범위를 줄이세요.`);
       c.previousSignature=previousSignature;c.nextPage=p+1;
+      if(c.pageWait?.keyword===keyword&&c.pageWait.page===p){
+        state.incompletePages=state.incompletePages.filter(x=>x!==c.pageWait.label);delete c.pageWait;
+      }
       state.discovered=c.products.length;state.ads+=result.ads;
       state.pageStats.push({keyword,page:p,products:result.products.length,newItems:newly,total:c.products.length});
       await save();
@@ -1539,9 +1608,15 @@
     }catch(e){
       if(job!==j)return;
       const stopped=j.cancelled;
+      if(!stopped&&e.code==='PAGE_WAIT'){
+        j.waitingForPage=true;
+        const page=state.collection?.nextPage;
+        await patch(j,{phase:'페이지 확인 대기',error:'',stage:`${page}페이지 상품 갱신을 기다립니다. 계속 멈추면 실제 다른 페이지 → ${page}페이지 버튼을 직접 누른 뒤 이어하기를 누르세요.`,currentStore:''});
+        return;
+      }
       await patch(j,{phase:stopped?'중단됨':'오류',error:stopped?'':(e.message||str(e)),stage:stopped?'사용자가 중단했습니다.':(e.message||str(e))});
       await log(j,stopped?'작업 중단됨':`오류: ${e.message||str(e)}`);
-    }finally{if(job===j){await patch(j,{running:false,paused:false,finishedAt:Date.now()});job=null;}}
+    }finally{if(job===j){await patch(j,{running:false,paused:!!j.waitingForPage,finishedAt:j.waitingForPage?0:Date.now()});job=null;}}
   }
   async function getWorkTab(preferred){
     if(preferred){try{await chrome.tabs.get(preferred);return preferred;}catch{}}
@@ -1567,7 +1642,7 @@
         const minReviews=Math.max(0,Number(raw.minReviews)||0);
         const maxReviews=raw.maxReviews===''||raw.maxReviews==null?null:Number(raw.maxReviews);
         if(maxReviews!==null&&(!Number.isFinite(maxReviews)||maxReviews<minReviews))throw Error('리뷰 최대값은 최소값 이상이어야 합니다.');
-        const settings={keywords,minReviews,maxReviews,lookupMode:'company',reviewsEnabled:!!raw.reviewsEnabled,grouped:raw.grouped==='exclude'?'exclude':'include',ads:['all','exclude','only'].includes(raw.ads)?raw.ads:'all',owner:str(raw.owner||'').trim().slice(0,40)};
+        const settings={from,to,mode,keywords,minReviews,maxReviews,lookupMode:'company',reviewsEnabled:!!raw.reviewsEnabled,grouped:raw.grouped==='exclude'?'exclude':'include',ads:['all','exclude','only'].includes(raw.ads)?raw.ads:'all',owner:str(raw.owner||'').trim().slice(0,40)};
         const j={cancelled:false,paused:false,finishCollection:false,abort:null,tabId:sender.tab.id};job=j;
         reply({ok:true,accepted:true});
         void(async()=>{
@@ -1576,6 +1651,7 @@
             if(state.pending?.length||state.collection)throw Error('이전 작업이 남아 있습니다. 이어하기 또는 작업 초기화를 사용하세요.');
             await requireCompanyAccess();
             Object.assign(state,{runId:Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),pageTransitions:[],seen:[],matched:[],review:[],businessIndex:{},statistics:blankStats(),skipped:0,basic:[],running:true,paused:false,startedAt:Date.now(),finishedAt:0,logs:[],phase:'요청 접수',stage:'현재 네이버 탭에서 수집 시작',keyword,source:src,mode,searchUrl,settings,pageTotal:mode==='auto'?(src==='plus'?0:to-from+1):1,error:'',pageStats:[],auditPages:[],auditRows:[],auditTruncated:0,catalogDiagnostics:[],phoneDuplicates:0,currentStore:'',unidentifiedWarnings:0,unidentifiedUniqueCandidates:0,unidentifiedObservationCount:0,catalogWarnings:0,catalogExpanded:0,catalogBlockedReason:"",catalogDiagnostics:[],incompletePages:[],total:0,processed:0});
+            state.scanned=0;state.discovered=0;state.ads=0;state.page=0;
             state.collection={source:src,mode,searchUrl,from,to,keywords,keywordIndex:0,nextPage:from,previousSignature:'',products:[],catalogProcessed:{},tabId:sender.tab.id};
             await save();await log(j,`${src==='plus'?'플러스스토어':'가격비교'} '${keywords.join(', ')}' ${mode==='auto'?(src==='plus'?`연속 스크롤 (${PLUS_BATCH}개마다 저장, 수집 종료 버튼까지)`:`${from}~${to}페이지 번호 클릭 추출`):'현재 화면 추출'} 시작 · 새 탭 생성 없음`);
             await runJob(j);
