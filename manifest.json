@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "유승빈 DB추출기",
-  "version": "3.22",
+  "version": "3.23",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -47,6 +47,16 @@
       ],
       "css": [
         "src/extract/panel.css"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://smartstore.naver.com/*/products/*",
+        "https://brand.naver.com/*/products/*"
+      ],
+      "js": [
+        "src/store-capture.js"
       ],
       "run_at": "document_idle"
     }

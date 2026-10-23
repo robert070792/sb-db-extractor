@@ -1,20 +1,21 @@
-/* 유승빈 DB추출기 v3.22: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
+/* 유승빈 DB추출기 v3.23: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
 (() => {
   'use strict';
   const KEY='sb_leads_v20_state'; // chrome.storage.local: 컴퓨터 + Chrome 프로필별, sync 사용 안 함
   const LEDGER_KEY='sb_paid_lookup_ledger_v321'; // 작업 초기화와 독립된 과금 가능 요청 이력
+  const STORE_MAP_KEY='sb_verified_store_links_v323';
   const SHOP_ORIGIN='https://search.shopping.naver.com';
   const MAX_PAGES=10, MAX_STORES=1200, MAX_ITEMS=12000, SCROLL_DELAY=390, PLUS_BATCH=60;
   const C=SBCore;
   // 사용자가 직접 연 상품에서 확인: brand.naver.com/basictone/products/6149475814 (mallSeq 362714).
   // 사용자 제공 실제 상품 URL과 광고의 mallSeq로 확인된 매핑만 사용. 표시명으로 추측하지 않음.
-  const VERIFIED_STORES={'362714':'https://brand.naver.com/basictone','460325':'https://brand.naver.com/mixandmatch'};
+  const VERIFIED_STORES={'362714':'https://brand.naver.com/basictone','460325':'https://brand.naver.com/mixandmatch','12407903':'https://smartstore.naver.com/ttasomihome'};
   const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const clock=()=>new Date().toLocaleTimeString('ko-KR');
   const str=v=>String(v==null?'':v);
   const blankStats=()=>({filtered:0,duplicate:0,unknownReviews:0,unknownGroup:0,adsExcluded:0,sameSeller:0,invalidSeller:0,selected:0,checked:0,new:0,absent:0,rejected:0,paid:0,paymentScheduled:0,sameBranch:0,otherBranch:0,unknown:0,excluded:0,no010:0,businessDuplicates:0,lookupPrevented:0,bizCached:0,bizLatest:0,bizLegacy:0,bizErrors:0,bizUrlMissing:0,bizAuthErrors:0,bizUrlMissingAds:0,bizUrlMissingCatalogs:0,bizStoreRecovered:0,bizStoreConflicts:0,bizNoDetails:0});
   const blank=()=>({runId:Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),pageTransitions:[],settings:{},basic:[],seen:[],lookupAttempted:[],businessIndex:{},statistics:blankStats(),pending:[],collection:null,running:false,paused:false,phase:'대기 중',stage:'',startedAt:0,finishedAt:0,processed:0,total:0,scanned:0,page:0,pageTotal:0,matched:[],review:[],logs:[],error:'',discovered:0,ads:0,keyword:'',source:'',mode:'',searchUrl:'',skipped:0,pageStats:[],auditPages:[],auditRows:[],auditTruncated:0,catalogDiagnostics:[],phoneDuplicates:0,currentStore:'',unidentifiedWarnings:0,catalogWarnings:0,catalogExpanded:0,catalogBlockedReason:"",incompletePages:[],plusBatchSize:PLUS_BATCH});
-  let state=null,job=null,lookupLedger={};
+  let state=null,job=null,lookupLedger={},rememberedStores={},storeSaveQueue=Promise.resolve();
   function sourceUrl(raw){
     try{const u=new URL(raw);if(u.origin!==SHOP_ORIGIN||!u.searchParams.get('query'))return null;
       if(/^\/search\//.test(u.pathname))return 'price';
@@ -23,7 +24,8 @@
   }
   async function save(){if(state)await chrome.storage.local.set({[KEY]:state});}
   async function getState(){
-    if(!state){const data=await chrome.storage.local.get([KEY,LEDGER_KEY]);if(state)return state;const saved=data[KEY]||{};
+    if(!state){const data=await chrome.storage.local.get([KEY,LEDGER_KEY,STORE_MAP_KEY]);if(state)return state;const saved=data[KEY]||{};
+      rememberedStores=data[STORE_MAP_KEY]||{};
       state={...blank(),...saved,statistics:{...blankStats(),...(saved.statistics||{})}};
       state.seen=[...new Set((state.seen||[]).map(str))];
       state.lookupAttempted=[...new Set((state.lookupAttempted||[]).map(str))];
@@ -36,6 +38,48 @@
       if(state.running&&!job){state.running=false;state.paused=true;state.phase='이전 작업 이어하기 대기';state.stage='백그라운드 작업이 중단됐습니다. 기존 기록을 보존했습니다. 이어하기를 누르세요.';await save();}
     }
     return state;
+  }
+  function storeHints(items){
+    const hints={...VERIFIED_STORES};
+    for(const [id,rec] of Object.entries(rememberedStores)){
+      if(rec.conflict||!C.storeBase(rec.storeUrl))continue;
+      if(items.some(x=>str(x.mallSeq)===id&&x.chnlNo&&rec.channelNo&&str(x.chnlNo)!==rec.channelNo))continue;
+      hints[id]=rec.storeUrl;
+    }
+    return hints;
+  }
+  // 사용자가 직접 연 상품의 해당 상품·판매자 식별값만 반환. 전체 상태/쿠키는 읽어 보내지 않습니다.
+  function inspectOpenedStore(){
+    const u=new URL(location.href),m=u.pathname.match(/^\/([a-zA-Z0-9_-]+)\/products\/(\d+)\/?$/);
+    if(!m||!['smartstore.naver.com','brand.naver.com'].includes(u.hostname))return null;
+    const state=window.__PRELOADED_STATE__;if(!state)return null;
+    const channels=[state.smartStoreV2?.channel,state.channel?.A,state.channel].filter(x=>x&&/^\d+$/.test(String(x.mallSeq||'')));
+    const sellers=[...new Set(channels.map(x=>String(x.mallSeq)))];if(sellers.length!==1)return null;
+    const products=[state.simpleProductForDetailPage?.A,state.product?.A,state.simpleProductForDetailPage,state.product].filter(Boolean);
+    const product=products.find(x=>[x.id,x.channelProductNo,x.chnlProdNo].some(n=>String(n)===m[2]));
+    if(!product)return null;
+    const channel=channels[0];
+    return {storeUrl:u.origin+'/'+m[1],mallSeq:sellers[0],channelNo:String(channel.channelNo||channel.id||''),productNo:m[2],nvMid:String(product.epInfo?.syncNvMid||'')};
+  }
+  async function rememberOpenedStore(sender){
+    if(sender.frameId&&sender.frameId!==0)return {saved:false};
+    const base=C.storeBase(sender.tab?.url),evidence=C.productEvidence(sender.tab?.url);
+    if(!base||evidence.length!==1||!sender.tab?.id)return {saved:false};
+    const result=await chrome.scripting.executeScript({target:{tabId:sender.tab.id},world:'MAIN',func:inspectOpenedStore});
+    const found=result?.[0]?.result;
+    if(!found||found.storeUrl!==base||found.productNo!==evidence[0].id||!/^\d+$/.test(found.mallSeq))return {saved:false};
+    const observed=[...(state.auditRows||[]),...(state.pending||[]),...(state.collection?.products||[])];
+    if(observed.some(x=>str(x.channelProductNo||x.chnlProdNo)===found.productNo&&x.mallSeq&&str(x.mallSeq)!==found.mallSeq))return {saved:false,reason:'상품 판매자 불일치'};
+    if(found.channelNo&&observed.some(x=>str(x.channelProductNo||x.chnlProdNo)===found.productNo&&x.chnlNo&&str(x.chnlNo)!==found.channelNo))return {saved:false,reason:'상품 채널 불일치'};
+    const saveMapping=storeSaveQueue.then(async()=>{
+      const old=rememberedStores[found.mallSeq];
+      if((old&&old.storeUrl!==base)||(VERIFIED_STORES[found.mallSeq]&&VERIFIED_STORES[found.mallSeq]!==base))return {saved:false,reason:'기존 확인 주소와 충돌'};
+      if(old?.storeUrl===base)return {saved:true};
+      const next={...rememberedStores,[found.mallSeq]:{...found,verifiedAt:new Date().toISOString(),source:'사용자가 연 상품 페이지의 상품번호·판매자 확인'}};
+      await chrome.storage.local.set({[STORE_MAP_KEY]:next});rememberedStores=next;
+      return {saved:true};
+    });
+    storeSaveQueue=saveMapping.catch(()=>{});return saveMapping;
   }
   function lookupAlreadyRequested(id,storeUrl){
     const base=C.storeBase(storeUrl);
@@ -118,12 +162,22 @@
       const s=String(raw??'').replace(/,/g,'').trim();if(/^\d+$/.test(s))return Number(s);
       const m=s.match(/^(\d+(?:\.\d+)?)\s*(만|천)$/);return m?Math.round(Number(m[1])*(m[2]==='만'?10000:1000)):null;
     };
-    const isVisibleText=el=>el&&el.textContent&&el.textContent.trim();
+    const rendered=el=>{
+      if(el?.isConnected===false)return false;
+      for(let node=el;node;node=node.parentElement){
+        if(node.hidden||node.getAttribute?.('aria-hidden')==='true')return false;
+        if(typeof getComputedStyle==='function'&&node.nodeType===1){const st=getComputedStyle(node);if(st.display==='none'||st.visibility==='hidden'||st.visibility==='collapse'||st.contentVisibility==='hidden')return false;}
+      }
+      return true;
+    };
+    const isVisibleText=el=>el&&rendered(el)&&el.textContent&&el.textContent.trim();
     // 대표상품 후보를 판매자번호 존재 여부와 별도로 계산해 수집 누락의 원인을 진단합니다.
     // "후보"는 화면에 생성된 제목/이미지 링크 기준으로, 독립 판매상품 수와 같다고 단정하지 않습니다.
     const representativeKeys=new Set(), representativeNoProvider=new Set(), representativeNoProductId=new Set(),representativeDetails=new Map();
     const representativeArea=/\.(?:title|tit|img|image|prodTitle)$/i;
-    const representativeAnchors=[...document.querySelectorAll('a[data-shp-area]')];
+    const allRepresentativeAnchors=[...document.querySelectorAll('a[data-shp-area]')];
+    const representativeAnchors=allRepresentativeAnchors.filter(rendered);
+    const hiddenAnchors=allRepresentativeAnchors.length-representativeAnchors.length;
     const representativeKey=node=>{
       const prod=String(node.getAttribute('data-shp-contents-id')||'').trim(),mall=String(node.getAttribute('data-shp-contents-provider-id')||'').trim();
       const title=String(node.getAttribute('title')||node.textContent||'').trim().slice(0,90);
@@ -143,7 +197,7 @@
       if(!representativeDetails.has(key))representativeDetails.set(key,{key,nvMid:numeric(prod),mallSeq:numeric(mall),title:ownTitle,
         reason:!numeric(mall)?'판매자번호 없음':!numeric(prod)?'상품번호 없음':'대표상품 수집 조건 미충족'});
     }
-    const listingAnchors=[...document.querySelectorAll('a[data-shp-contents-provider-id]')].filter(a=>{const area=a.getAttribute('data-shp-area')||'';return /^(lst\*|lst\.)/.test(area)&&!/\.(?:mylist|wish|zzim|addCart|cart|favorite)$/i.test(area);});
+    const listingAnchors=[...document.querySelectorAll('a[data-shp-contents-provider-id]')].filter(a=>{const area=a.getAttribute('data-shp-area')||'';return rendered(a)&&/^(lst\*|lst\.)/.test(area)&&!/\.(?:mylist|wish|zzim|addCart|cart|favorite)$/i.test(area);});
     listingAnchors.sort((a,b)=>{
       const weight=x=>{const area=x.getAttribute('data-shp-area')||'';return /\.(?:title|tit|prodTitle)$/i.test(area)?0:/\.(?:img|image)$/i.test(area)?1:2;};
       return weight(a)-weight(b);
@@ -337,7 +391,23 @@
     }
     const bodyText=(document.body?.innerText||'').slice(0,8000);
     const challenge=/(자동입력|자동 입력|보안문자|보안 문자|비정상적인 접근|비정상적인 요청|로봇이 아닙니다|captcha|자동화된 접근|숫자를 입력|문자를 입력|자동등록방지)/i.test(bodyText)&&records.length===0;
-    return {records,ads,cards,rawEvents,nestedOffersExcluded,ambiguousCards,
+    const watch=window.__sbPageWatch323;
+    let lifecycle=null;
+    if(watch&&typeof performance!=='undefined'){
+      const age=performance.now()-watch.started;
+      if(age>=0&&age<90000){
+        const responses=(performance.getEntriesByType?.('resource')||[]).filter(x=>x.startTime>=watch.started&&x.responseEnd>0).flatMap(x=>{
+          try{const u=new URL(x.name);const page=Number(u.searchParams.get('pagingIndex'));
+            if(u.origin!==location.origin||!/^\/(?:api\/)?search\//.test(u.pathname)||!Number.isInteger(page)||page<1||page>10)return [];
+            return [{page,status:x.responseStatus||0,query:u.searchParams.get('query')||'',path:u.pathname}];
+          }catch{return [];}
+        }).slice(-10);
+        lifecycle={fromPage:watch.fromPage,targetPage:watch.targetPage,navigation:watch.navigation,ageMs:age,
+          productNodesAdded:watch.added,productNodesRemoved:watch.removed,organicAdded:watch.organicAdded,organicRemoved:watch.organicRemoved,quietMs:performance.now()-watch.lastMutation,responses};
+      }
+    }
+    const loading=representativeAnchors.some(a=>a.closest?.('[aria-busy="true"]'));
+    return {records,ads,cards,rawEvents,nestedOffersExcluded,ambiguousCards,hiddenAnchors,loading,lifecycle,
       representativeKeys:[...representativeKeys].slice(0,1200),representativeNoProviderKeys:[...representativeNoProvider].slice(0,500),
       representativeNoProductKeys:[...representativeNoProductId].slice(0,500),
       representativeDetails:[...representativeDetails.values()].slice(0,1200),
@@ -366,11 +436,15 @@
     const numbers=[...new Set(links.map(el=>Number(el.textContent.trim())))].sort((a,b)=>a-b);
     let urlPage=null;try{const v=new URL(location.href).searchParams.get('pagingIndex');urlPage=v===null?1:Number(v);if(!Number.isInteger(urlPage)||urlPage<1||urlPage>10)urlPage=null;}catch{}
     let domCurrent=null,method='페이지 번호 미확인';
-    if(numbers.length===9){const missing=Array.from({length:10},(_,i)=>i+1).filter(n=>!numbers.includes(n));if(missing.length===1){domCurrent=missing[0];method='실제 숫자 링크에서 누락된 페이지';}}
-    if(domCurrent===null&&group){
-      const active=group.root.querySelectorAll('[aria-current="page"],[class*="active"],[class*="current"],strong[class*="pagination"]');
-      const vals=[...active].map(el=>Number((el.textContent||'').trim())).filter(n=>Number.isInteger(n)&&n>=1&&n<=10);
+    if(group){
+      const active=[...group.root.querySelectorAll('[aria-current="page"],[aria-selected="true"],[class*="active"],[class*="current"],strong')].filter(visible);
+      const vals=[...new Set(active.map(el=>Number((el.textContent||'').trim())).filter(n=>Number.isInteger(n)&&n>=1&&n<=10))];
       if(vals.length===1){domCurrent=vals[0];method='페이지네이션 내 활성 번호';}
+    }
+    if(domCurrent===null&&numbers.length===9){const missing=Array.from({length:10},(_,i)=>i+1).filter(n=>!numbers.includes(n));if(missing.length===1){domCurrent=missing[0];method='실제 숫자 링크에서 누락된 페이지';}}
+    if(domCurrent===null&&numbers.length>=2&&!/…|\.\.\./.test(group?.root.textContent||'')){
+      const gaps=[];for(let n=numbers[0]+1;n<numbers[numbers.length-1];n++)if(!numbers.includes(n))gaps.push(n);
+      if(gaps.length===1){domCurrent=gaps[0];method='실제 숫자 링크 사이의 선택 번호';}
     }
     const disagree=domCurrent!==null&&urlPage!==null&&domCurrent!==urlPage;
     return {current:domCurrent??urlPage,domCurrent,selected:domCurrent,urlPage,disagree,method:domCurrent!==null?method:'URL만 확인',confidence:domCurrent!==null?'high':urlPage!==null?'low':'none',numbers,href:location.href,groupFound:links.length>=1};
@@ -385,10 +459,35 @@
     const available=[...new Set(numeric.map(x=>x.page))].sort((a,b)=>a-b);
     if(available.length<1)return {ok:false,reason:'가격비교 페이지 번호 링크를 찾지 못했습니다.',available};
     let chosen=numeric.find(x=>x.page===targetPage),navigation='number';
-    if(!chosen)return {ok:false,reason:`${targetPage}페이지 링크가 표시되지 않았습니다.`,available};
+    if(!chosen&&Number.isInteger(fromPage)&&fromPage!==targetPage&&targetPage>=1&&targetPage<=10){
+      const scope=groups[0]?.root.closest('[class*="pagination_pagination"]')||groups[0]?.root.parentElement;
+      navigation=targetPage<fromPage?'prev':'next';
+      const el=[...(scope?.querySelectorAll('a,button')||[])].find(x=>visible(x)&&!x.disabled&&x.getAttribute('aria-disabled')!=='true'&&x.matches(`[class*="pagination_${navigation}"]`));
+      if(el)chosen={el,page:null};
+    }
+    if(!chosen)return {ok:false,reason:`${targetPage}페이지 또는 해당 방향의 실제 이동 버튼이 없습니다.`,available};
     // 클릭 전에 실제 페이지 번호 링크 주소를 보존합니다. 클릭 후 SPA가 링크 DOM을 교체할 수 있습니다.
     const linkHref=String(chosen.el.href||chosen.el.getAttribute('href')||'');
     chosen.el.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});
+    // 제품 노드 교체만 관찰합니다. pgn 같은 추적 속성만 변경된 것은 상품 갱신 증거로 세지 않습니다.
+    window.__sbPageWatch323?.observer?.disconnect();
+    const clock=()=>typeof performance!=='undefined'?performance.now():Date.now();
+    const watch={fromPage,targetPage:chosen.page,navigation,started:clock(),lastMutation:clock(),added:0,removed:0,organicAdded:0,organicRemoved:0};
+    if(typeof MutationObserver!=='undefined'){
+      const shown=node=>{for(let el=node;el?.nodeType===1;el=el.parentElement){const st=getComputedStyle(el);if(el.hidden||el.getAttribute('aria-hidden')==='true'||st.display==='none'||st.visibility==='hidden'||st.contentVisibility==='hidden')return false;}return true;};
+      const count=(node,organic=false)=>{
+        if(node.nodeType!==1)return 0;
+        const anchors=[...(node.matches?.('a[data-shp-area]')?[node]:[]),...(node.querySelectorAll?.('a[data-shp-area]')||[])];
+        return anchors.filter(a=>{if(!shown(a))return false;const area=a.getAttribute('data-shp-area')||'';let log={};try{log=JSON.parse(a.getAttribute('data-nlog-params')||'{}');}catch{};const ad=/^lst\*A\./.test(area)||a.getAttribute('data-shp-contents-grp')==='ad'||log.is_ad===true||log.is_ad==='true';return /^(lst\*|lst\.)/.test(area)&&/\.(?:title|tit|prodTitle)$/.test(area)&&(!organic||!ad);}).length;
+      };
+      watch.observer=new MutationObserver(mutations=>{
+        for(const m of mutations){if(!shown(m.target))continue;const add=[...m.addedNodes].reduce((n,x)=>n+count(x),0),remove=[...m.removedNodes].reduce((n,x)=>n+count(x),0);
+          if(add||remove){watch.organicAdded+=[...m.addedNodes].reduce((n,x)=>n+count(x,true),0);watch.organicRemoved+=[...m.removedNodes].reduce((n,x)=>n+count(x,true),0);watch.added+=add;watch.removed+=remove;watch.lastMutation=clock();}}
+      });
+      watch.observer.observe(document.body,{childList:true,subtree:true});
+      setTimeout(()=>watch.observer.disconnect(),60000);
+    }
+    window.__sbPageWatch323=watch;
     chosen.el.click();
     return {ok:true,clickedPage:chosen.page,navigation,available,linkHref};
   }
@@ -690,7 +789,7 @@
   }
   function productSignature(data){return (data?.records||[]).map(x=>x.mallSeq+':'+(x.chnlProdNo||x.nvMid)).sort().join('|');}
   async function clickPage(tabId,page,currentPage){
-    const r=await chrome.scripting.executeScript({target:{tabId},world:'ISOLATED',func:clickPricePagination,args:[page,currentPage]});
+    const r=await chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:clickPricePagination,args:[page,currentPage]});
     return r?.[0]?.result;
   }
   async function inspectPager(tabId){
@@ -704,7 +803,7 @@
     const r=await chrome.scripting.executeScript({target:{tabId},world:'ISOLATED',func:scrollToPriceFooter});
     return r?.[0]?.result;
   }
-  async function inspect(tabId){const result=await chrome.scripting.executeScript({target:{tabId},world:'ISOLATED',func:inspectProducts});return result?.[0]?.result;}
+  async function inspect(tabId){const result=await chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:inspectProducts});return result?.[0]?.result;}
   async function scroll(tabId){const result=await chrome.scripting.executeScript({target:{tabId},world:'ISOLATED',func:doScroll});return result?.[0]?.result;}
   async function waitForProducts(j,tabId,page){
     let deadline=Date.now()+30000,lastError='',wasChallenge=false;
@@ -777,36 +876,46 @@
         await waitIfPaused(j);deadline=Date.now()+limitMs;continue;
       }
       if(!data?.records?.length)continue;
+      const target=expectedPage??pager.domCurrent;
+      if(!Number.isInteger(target)||target===beforePage)continue;
+      if(expectedPage===null&&((j.navigationDirection==='prev'&&target>=beforePage)||(j.navigationDirection==='next'&&target<=beforePage)))continue;
       const before=typeof beforeSignature==='object'?beforeSignature:{signature:beforeSignature,requests:[]};
       const evidence=pageEvidence(data),sig=evidence.signature;
       const organicChanged=Boolean(before.organicSignature&&evidence.organicSignature&&before.organicSignature!==evidence.organicSignature);
       const listChanged=Boolean(before.signature&&sig&&before.signature!==sig);
       const requestChanged=Boolean(before.requests?.length&&evidence.requests.length&&evidence.requests.every(x=>!before.requests.includes(x)));
-      const domTarget=expectedPage!==null&&pager.domCurrent===expectedPage;
-      const domOther=pager.domCurrent!==null&&pager.domCurrent!==expectedPage;
-      const urlTarget=expectedPage!==null&&pager.urlPage===expectedPage;
+      const domTarget=pager.domCurrent===target;
       // URL은 SPA에서 이전 값일 수 있습니다. 정확한 페이지 링크 9개에서 빠진 번호가 우선 증거입니다.
       const observed=(data.records||[]).map(x=>x.observedPage).filter(x=>Number.isInteger(x));
-      const matching=observed.filter(x=>x===expectedPage).length;
-      const conflicting=observed.filter(x=>x!==expectedPage).length;
+      const matching=observed.filter(x=>x===target).length;
+      const conflicting=observed.filter(x=>x!==target).length;
       // 페이지 번호/URL만 바뀐 SPA 상태는 성공으로 보지 않습니다.
-      // 반대로 pgn 메타가 충분히 수집된 경우에도 기존 페이지와 목록이 다른지 반드시 검증합니다.
+      // 상품 집합이 같아도 클릭 후 일반상품 노드 갱신/페이지 응답이 검증되면 관측을 보존합니다.
       const proofRows=evidence.products.filter(x=>!x.isAd);
       const requestRows=proofRows.length?proofRows:evidence.products;
       const requestProof=requestChanged&&observed.length>=3&&matching===observed.length&&requestRows.length>=3&&requestRows.every(x=>x.request&&!before.requests.includes(x.request));
       const listingProof=before.organicSignature&&evidence.organicSignature?organicChanged:listChanged;
-      const proven=domTarget&&conflicting===0&&(listingProof||requestProof);
-      const transition={expectedPage,beforePage,domCurrent:pager.domCurrent,urlPage:pager.urlPage,listChanged,organicChanged,requestChanged,matching,observed:observed.length,before,after:evidence};
+      const life=data.lifecycle;
+      const tied=life&&life.fromPage===beforePage&&(life.targetPage===target||life.targetPage===null)&&life.ageMs>=1750;
+      const metadataProof=observed.length>=Math.min(3,data.records.length)&&matching===observed.length;
+      const organicCount=data.records.filter(x=>!x.isAd).length;
+      const added=organicCount?life?.organicAdded:life?.productNodesAdded,removed=organicCount?life?.organicRemoved:life?.productNodesRemoved;
+      const renderProof=!!(tied&&metadataProof&&added>=Math.min(3,organicCount||data.records.length)&&removed>=Math.min(3,organicCount||data.records.length)&&life.quietMs>=800);
+      const keyword=(()=>{try{return new URL(data.url||'').searchParams.get('query')||'';}catch{return '';}})();
+      const responseProof=!!(tied&&metadataProof&&life.responses?.some(x=>x.page===target&&x.status>=200&&x.status<300&&(!keyword||x.query===keyword)));
+      const lifecycleProof=renderProof||responseProof;
+      const proven=domTarget&&conflicting===0&&!data.loading&&(listingProof||requestProof||lifecycleProof);
+      const transition={expectedPage,beforePage,actualPage:target,lifecycle:data.lifecycle||null,loading:!!data.loading,hiddenAnchors:data.hiddenAnchors||0,renderProof,responseProof,domCurrent:pager.domCurrent,urlPage:pager.urlPage,listChanged,organicChanged,requestChanged,matching,observed:observed.length,before,after:evidence};
       j.lastPageTransition=transition;
       lastState=`페이지 링크 현재 ${pager.domCurrent??'-'}, URL ${pager.urlPage??'-'}, 상품변경 ${listChanged?'예':'아니오'}, 상품 pgn ${matching}/${observed.length}, 검색응답 변경 ${requestChanged?'예':'아니오'}, 보이는 번호 ${(pager.numbers||[]).join(',')}`;
       if(!proven||Date.now()-started<1750){stable=0;lastFingerprint='';continue;}
-      const fingerprint=[pager.domCurrent,pager.urlPage,sig,evidence.requests.join(',')].join('|');
+      const fingerprint=[pager.domCurrent,pager.urlPage,sig,matching,!!data.loading,evidence.requests.join(',')].join('|');
       stable=fingerprint===lastFingerprint?stable+1:1;lastFingerprint=fingerprint;
       if(stable<2)continue;
-      // 목록 데이터가 이전 페이지와 다르다는 증거가 반드시 필요합니다.
-      j.pageProof={page:expectedPage,requestProof,requests:evidence.requests};
+      // 상품이 같아도 새 렌더링/페이지 응답과 목표 페이지 메타가 일치하면 페이지별 관측으로 보존합니다.
+      j.pageProof={page:target,requestProof,lifecycleProof,signature:sig,requests:evidence.requests};
       state.pageTransitions.push({...transition,result:'confirmed'});state.pageTransitions=state.pageTransitions.slice(-100);
-      return {data,pager,actual:expectedPage,proof:requestProof&&!listChanged?'실제 숫자 버튼·새 검색응답·상품 페이지 일치':'실제 숫자 버튼·상품 목록 갱신 확인'};
+      return {data,pager,actual:target,proof:lifecycleProof?'실제 페이지 선택·상품 렌더링/페이지 응답 확인':requestProof&&!listChanged?'실제 숫자 버튼·새 검색응답·상품 페이지 일치':'실제 숫자 버튼·상품 목록 갱신 확인'};
     }
     if(j.lastPageTransition){state.pageTransitions.push({...j.lastPageTransition,result:'unverified'});state.pageTransitions=state.pageTransitions.slice(-100);await save();}
     throw Error(`페이지 이동 확인 실패 (${lastState||'페이지 응답 없음'}). 실제 페이지 버튼 또는 상품 로딩을 확인하세요.`);
@@ -862,12 +971,13 @@
       const clicked=await clickPage(tabId,targetPage,actual);
       if(!clicked?.ok)throw Error(`${targetPage}페이지 버튼을 찾지 못했습니다. 현재 ${actual??'미확인'}페이지, 보이는 번호 ${(clicked?.available||[]).join(', ')||'없음'}`);
       await log(j,`${keyword} · ${clicked.clickedPage??(clicked.navigation==='prev'?'이전':'다음')}페이지 버튼 클릭`);
+      j.navigationDirection=clicked.navigation;
       let after;
       await scrollTop(tabId);
       try{after=await waitForPricePageChange(j,tabId,clicked.clickedPage,signature,actual,15000);}
       catch(error){
         // 번호만 전환된 경우 실제 숫자 버튼으로 한 번만 복구한다. URL 재작성은 하지 않는다.
-        const recovered=await recoverPricePage(j,tabId,keyword,clicked.clickedPage,actual,signature);
+        const recovered=clicked.clickedPage===null?null:await recoverPricePage(j,tabId,keyword,clicked.clickedPage,actual,signature);
         if(!recovered)throw Error(`${keyword} ${clicked.clickedPage||targetPage}페이지 실제 상품 변경 미확인: ${str(error.message||error)}`);
         after=recovered;
       }
@@ -1049,7 +1159,7 @@
         await log(j,`${keyword} ${p}페이지 수집 실패 · 이전 상품은 보존하고 부분 완료로 진행: ${str(e.message||e).slice(0,180)}`);await save();break;
       }
       const sig=result.products.map(x=>x.mallSeq+':'+x.nvMid).sort().join('|');
-      const repeatedWithProof=j.pageProof?.page===p&&j.pageProof.requestProof&&result.products.every(x=>x.observedPage===p&&j.pageProof.requests.includes(x.searchRequestId));
+      const repeatedWithProof=j.pageProof?.page===p&&result.products.every(x=>x.observedPage===p)&&((j.pageProof.requestProof&&result.products.every(x=>j.pageProof.requests.includes(x.searchRequestId)))||j.pageProof.lifecycleProof);
       if(previousSignature&&sig===previousSignature&&!repeatedWithProof){
         await log(j,`${keyword} ${p}페이지에 이전 페이지 상품이 재등장했습니다. 완료 처리하지 않고 자동으로 재확인합니다.`);
         await scrollTop(j.tabId);await pause(1400);
@@ -1184,7 +1294,7 @@
     }
     // 모든 키워드/페이지 수집 후 동일 판매자 주소를 전파합니다. 해당 상품의 실제 스토어가
     // 다르게 관찰되면 덮어쓰지 않고 충돌 진단만 남깁니다.
-    const identity=C.enrichStoreUrls(c.products,VERIFIED_STORES);
+    const identity=C.enrichStoreUrls(c.products,storeHints(c.products));
     c.products=identity.products;
     state.statistics.bizStoreRecovered+=identity.recovered;
     state.statistics.bizStoreConflicts+=identity.conflicts.length;
@@ -1241,7 +1351,7 @@
     }finally{clearTimeout(timer);if(j.abort===ac)j.abort=null;}
   }
   async function timeout(p,ms,name,onTimeout){let t;try{return await Promise.race([p,new Promise((_,reject)=>t=setTimeout(()=>{onTimeout?.();reject(Error(`${name} ${ms/1000}초 초과`));},ms))]);}finally{clearTimeout(t);}}
-  function addReview(item,reason,business={}){state.review.push({keyword:item.keyword,page:item.page,mallSeq:item.mallSeq,nvMid:item.nvMid,productName:item.title||'',productUrl:C.cleanProductUrl(item.productUrl,item.storeUrl,item.chnlProdNo),observedProductUrl:item.observedProductUrl||'',storeUrl:item.storeUrl||business.storeUrl||'',storeName:item.storeName||business.companyName||'',ceoName:business.ceoName||'',phoneNumber:business.phoneNumber||'',phoneCandidates:(business.phoneCandidates||[]).map(x=>x.number).join(' / '),address:business.address||'',reason,lookupOrigin:item.lookupOrigin||'',memo:C.flagList(item).join(', ')});}
+  function addReview(item,reason,business={}){state.review.push({keyword:item.keyword,page:item.page,mallSeq:item.mallSeq,nvMid:item.nvMid,productName:item.title||'',productUrl:C.cleanProductUrl(item.productUrl,item.storeUrl,item.chnlProdNo),observedProductUrl:item.observedProductUrl||'',storeUrl:item.storeUrl||business.storeUrl||'',storeName:item.storeName||business.companyName||'',ceoName:business.ceoName||'',phoneNumber:business.phoneNumber||'',phoneCandidates:(business.phoneCandidates||[]).map(x=>x.number).join(' / '),address:business.address||'',reason,lookupOrigin:item.lookupOrigin||'',lookupHttpStatus:item.lookupDiagnostic?.httpStatus||'',lookupEndpoint:item.lookupDiagnostic?.endpoint||'',lookupServerMessage:item.lookupDiagnostic?.serverMessage||'',memo:C.flagList(item).join(', ')});}
   async function processPending(j){
     while(state.pending?.length){
       await waitIfPaused(j);
@@ -1272,9 +1382,11 @@
             await patch(j,{stage:`${name} · 사업자 연락처 조회`,currentStore:name});
             // 최신 조회기에서 회사 어드민에 저장한 URL도 활용. 매칭된 mallSeq의 상태 응답만 신뢰.
             // 회사 캐시 조회/URL 확인은 과금 대상이 아니므로 재조회 차단 이력에 기록하지 않음.
+            const remembered=storeHints([item])[id];
+            if(!item.storeUrl&&remembered){item.storeUrl=remembered;item.productUrl=C.cleanProductUrl(item.productUrl,remembered,item.chnlProdNo);}
             const prepared=await timeout(prepareBusinessLookup(id,item.storeUrl,item.productUrl,rec.storeUrl,rec.storeProductUrl,item.chnlProdNo,item.nvMid),16000,'조회 준비');
             assertActive(j);
-            holdBusiness=prepared.cacheData||{};
+            holdBusiness=prepared.cacheData||{};item.lookupOrigin=prepared.origin||'';
             if(prepared.cacheIncomplete)await log(j,`${name} · 회사 캐시의 온전한 010 미확보 → ${prepared.kind==='legacy'?'판매자번호+쇼핑상품번호':'스토어 주소'}로 신규 조회`);
             if(prepared.kind==='conflict'){
               state.statistics.bizIdentityConflicts=(state.statistics.bizIdentityConflicts||0)+1;
@@ -1313,6 +1425,7 @@
                 biz=await timeout(operation,22000,'사업자정보 요청',()=>ac.abort());
               }finally{if(j.abort===ac)j.abort=null;}
               assertActive(j);
+              item.lookupDiagnostic={httpStatus:biz?.httpStatus||'',endpoint:biz?.endpoint||'',serverMessage:biz?.serverMessage||''};
               if(!biz?.success||!biz.data){
                 if(biz?.code==='AUTH_REQUIRED')state.statistics.bizAuthErrors++;
                 if(biz?.code==='NO_SELLER_DETAILS')state.statistics.bizNoDetails++;
@@ -1455,6 +1568,7 @@
     (async()=>{
       await getState();
       if(req.action==='sb:state')return {state};
+      if(req.action==='sb:remember-store')return rememberOpenedStore(sender);
       if(req.action==='sb:inspect'){
         if(!sourceUrl(sender.tab?.url||''))throw Error('네이버 쇼핑 검색 결과에서 실행하세요.');
         const data=await inspect(sender.tab.id);const map=new Map();for(const r of data?.records||[])if(!map.has(r.mallSeq))map.set(r.mallSeq,r);
@@ -1463,7 +1577,7 @@
       if(req.action==='sb:health'){
         const origin=await getApiBaseUrl();
         const hasAccess=await hasCompanyAccess();
-        return {health:{serverOrigin:origin,hasAccess,source:sourceUrl(sender.tab?.url||''),secureTransport:false,modernSecureTransport:true,lookupMode:'company',newLookup:true,businessApi:'26.7.03 URL검증+사내캐시 (구형 404 경로 자동호출 중단)'}};
+        return {health:{serverOrigin:origin,hasAccess,source:sourceUrl(sender.tab?.url||''),secureTransport:false,modernSecureTransport:true,lookupMode:'company',newLookup:true,businessApi:'유효한 010 캐시 / 주소 기반 최신 조회 / 주소 없으면 번호 조회 (서버 지원 여부 별도 진단)'}};
       }
       if(req.action==='sb:pause'){
         if(job){job.paused=true;state.paused=true;state.phase='일시정지';await save();}return {state};

@@ -1,0 +1,126 @@
+
+> sb-db-extractor@3.23.0 test
+> node --test tests/*.cjs tests/*.js
+
+PASS 9 business tests: cache, no URL no legacy, status URL, brand, cache URL, no auth, no double calls, save warning, URL safety
+✔ tests/test_business_v317.cjs (50.758497ms)
+PASS core smoke: mobile010, link validation, duplicate business index
+✔ tests/test_core_regression.cjs (33.769594ms)
+PASS latest server empty details properly classified, no paid fallback
+✔ tests/test_latest_empty_v318.cjs (35.773435ms)
+✔ recovery clicks the previous and target number, with no tab URL update (26.527992ms)
+✔ a failed actual button recovery cannot report success (1.565258ms)
+✔ page failure preserves preceding products and records a partial result (1.755261ms)
+✔ pipeline regression: missing (22.979042ms)
+✔ pipeline regression: latest (5.68723ms)
+✔ pipeline regression: cache (3.007975ms)
+PASS 4 DOM scenarios: encoded brand redirect, smartstore direct, no guessed URL, own anchor in multi-seller card
+✔ tests/test_store_extraction_v317.cjs (46.14228ms)
+PASS 4 DOM scenarios: encoded brand redirect, smartstore direct, no guessed URL, own anchor in multi-seller card
+PASS additional v3.18 own-link metadata and multi-seller self-evidence tests
+✔ tests/test_store_extraction_v318.cjs (50.293866ms)
+PASS 8 v3.18 store mapping cases
+✔ tests/test_store_map_v318.cjs (30.12312ms)
+PASS v3.21 actual-number click route; direct tab updates forbidden by fixture
+PASS primary candidate count distinguishes missing provider from captured product
+✔ tests/test_v319_navigation_coverage.cjs (56.022127ms)
+✔ real search DOM: input events and magnifier click, never clear/expand/Enter (96.603905ms)
+✔ missing magnifier holds the search without clicking a different button (25.323149ms)
+✔ numeric text selects the correct pagination link despite misleading tracking IDs (28.362241ms)
+✔ two-page pagination with one inactive link is supported (12.978678ms)
+✔ a catalog representative without a seller ID survives collection for offer expansion (33.046008ms)
+✔ real DOM conflicting URL metadata is marked before business lookup (17.23652ms)
+✔ conflicting primary seller metadata is held instead of borrowing a seller identity (12.655747ms)
+✔ an encoded advertisement destination with a different product number is held (16.003636ms)
+✔ forty observed products from one seller remain forty audit rows and one lookup (211.981888ms)
+✔ panel renders, keeps stop enabled during lookups, and exports the original 16 columns (44.285618ms)
+✔ complete offline workflow: two keywords, two pages, real DOM clicks, seller consolidation and phones (322.384652ms)
+✔ product number and known store must agree with a direct or tracked URL (2.217278ms)
+✔ main placeholder stays only in observed data until an actual store is known (0.609667ms)
+✔ seller URL and channel conflicts hold every related row and send no requests (20.188912ms)
+✔ company cache cannot silently override contradictory observed store evidence (1.884323ms)
+✔ 010 in the alternative field is selected and both source contacts are preserved (3.754475ms)
+✔ international-format Korean mobile numbers are normalized without accepting landlines (0.164685ms)
+✔ no-010 hold preserves the business name, contact, address and product evidence (2.550364ms)
+✔ missing Naver authentication never records a paid attempt and works after login (3.356212ms)
+✔ durable request history survives reset; a new run permits required refresh (5.150842ms)
+✔ legacy request history migrates without dropping the independent ledger (1.153105ms)
+✔ background restart preserves pending work and resume completes that work (7.867904ms)
+✔ a storage write failure prevents the paid API call (1.955238ms)
+✔ failure to finalize the ledger does not discard a successful phone result (2.135477ms)
+✔ a dispatched failed request remains protected while company-cache recovery remains possible (3.713574ms)
+✔ cancellation before dispatch cannot trigger a paid request (0.885918ms)
+✔ stopping during cookie preflight cannot send a late request (1.738977ms)
+✔ pause and resume retain the pending item and send it only after resume (1.985233ms)
+✔ stopping during durable reservation clears a confirmed-unsent request (2.01031ms)
+✔ empty nested seller objects are a lookup failure rather than a no-010 company (1.052656ms)
+✔ advertisement, review and group filters retain their behavior while consolidating sellers (0.489869ms)
+✔ a scan budget reached before the bottom is partial, never a complete-page claim (1.624697ms)
+✔ bottom settling includes products arriving during the settling interval (1.4921ms)
+✔ coverage gaps stay numeric, get per-product reasons, and force partial completion (5.733138ms)
+✔ catalog total 25 vs 20 unique offers: correct completion result (2.963138ms)
+✔ catalog total 25 vs 25 unique offers: correct completion result (1.119766ms)
+✔ repeat catalog offers cannot count as additional collected products (1.456196ms)
+✔ the same business and mobile number are marked across different stores (3.121213ms)
+✔ advertisement without a store URL uses mallSeq + shopping nvMid, not the channel product number (21.49129ms)
+✔ incomplete cache refreshes: 02-123-4567 / numbers (3.207211ms)
+✔ incomplete cache refreshes: 02-123-4567 / store (3.064589ms)
+✔ incomplete cache refreshes: 010-9529-**** / numbers (2.507961ms)
+✔ incomplete cache refreshes: 010-9529-**** / store (3.218027ms)
+✔ incomplete cache refreshes: empty / numbers (2.176688ms)
+✔ incomplete cache refreshes: empty / store (2.364418ms)
+✔ full 010 cache needs no paid request even if store URL is absent (1.803413ms)
+✔ number response cannot silently accept wrong or empty identity: {"success":false} (2.378558ms)
+✔ number response cannot silently accept wrong or empty identity: {"data":{}} (12.073731ms)
+✔ number response cannot silently accept wrong or empty identity: {"mallSeq":"999","phoneNumber":"010-1111-2222"} (3.201693ms)
+✔ number response cannot silently accept wrong or empty identity: {"phoneNumber":"010-1111-2222","productUrl":"https://brand.naver.com/expected/products/999"} (3.033683ms)
+✔ fresh masked 010 is held as masked rather than no mobile, with contact evidence retained (3.152319ms)
+✔ number endpoint failure is a request error; incomplete cache evidence survives and no URL API retry occurs (2.981134ms)
+✔ old run history permits refresh; same run and resumed request cannot duplicate (5.475435ms)
+✔ failed new reservation restores previous run audit record without sending (2.395573ms)
+✔ same product IDs on a newly identified search response can confirm page 2 (2.516994ms)
+✔ page number and pgn alone cannot pass when product IDs and response ID remain unchanged (2.385849ms)
+✔ rotating only an advertisement does not prove the organic list changed (5.537618ms)
+✔ page 2 repeat observations are audited, not dropped, when a new response is proven (3.325677ms)
+✔ ad HTML shape captures numeric nvMid and search request proof without resolving or clicking the ad (91.804776ms)
+✔ catalog verification checks product identity and catalog ID and does not inherit another seller advertisement (3.081664ms)
+✔ sales special notes are empty for ordinary products, union verified flags when sellers consolidate (0.564429ms)
+✔ duplicate product observed again retains new advertising/catalog evidence without inflating counts (1.736524ms)
+✔ ad request refresh alone cannot confirm unchanged organic products with missing response evidence (1.755932ms)
+✔ hidden old products are excluded but below-fold visible products remain (109.359651ms)
+✔ actual clicks move 3→2→3→4→5 with identical products and stale URL; every page is audited (620.688309ms)
+✔ tracking metadata only cannot confirm a repeated product page (2.1177ms)
+✔ only advertisements replaced cannot confirm a repeated product page (1.258452ms)
+✔ wrong prior page cannot confirm a repeated product page (1.347285ms)
+✔ still loading cannot confirm a repeated product page (1.213425ms)
+✔ observed search response: success (1.249188ms)
+✔ observed search response: wrong keyword (1.290209ms)
+✔ observed search response: error (1.313134ms)
+✔ missing target uses actual previous button; tracking IDs and carousel are ignored (16.849474ms)
+✔ partial number links identify a unique interior selected page without nine links (10.0833ms)
+✔ verified ttasomihome address refreshes incomplete cache; fresh landline is correctly held (2.468432ms)
+✔ server failure retains sanitized diagnostics: 404 detail (2.364327ms)
+✔ server failure retains sanitized diagnostics: auth redaction (1.840668ms)
+✔ opened product is matched, saved without requests, and reused after reset and service worker restart (8.989733ms)
+✔ store capture rejects wrong product (5.26991ms)
+✔ store capture rejects conflicting seller (8.586343ms)
+✔ store capture rejects subframe (5.030693ms)
+✔ store capture rejects unrelated host (6.586258ms)
+✔ store capture rejects channel mismatch (5.630186ms)
+✔ latest API success=false preserves error details separately from fresh no-010 (1.918154ms)
+✔ store capture rejects a known product with a different channel (5.126286ms)
+✔ concurrent store observations preserve both mappings (1.224611ms)
+✔ page observer does not count hidden list replacement as a visible product refresh (9.660721ms)
+ℹ tests 100
+ℹ suites 0
+ℹ pass 100
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1438.319461
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

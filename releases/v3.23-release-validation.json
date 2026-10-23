@@ -1,0 +1,20 @@
+{
+  "version": "3.23",
+  "testFiles": 13,
+  "testUnits": 100,
+  "passed": 100,
+  "failed": 0,
+  "javascriptSyntaxFiles": 22,
+  "pythonSyntaxPassed": true,
+  "zipCRCValid": true,
+  "zipSourceBytesMatch": true,
+  "isolatedNpmCiPassed": true,
+  "isolatedZipTestsPassed": 100,
+  "olderArchivesUnchanged": [
+    "3.21",
+    "3.22"
+  ],
+  "sha256": "d7b532d598ca75c244d5209bd8f21ca512e1a4212ed1576f8785b38dfa052cd0",
+  "realNaverAndCompanyAPIVerified": false,
+  "numberEndpoint404Resolved": false
+}

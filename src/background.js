@@ -1,4 +1,4 @@
-/* 유승빈 DB추출기 v3.22 — 최신 사업자조회, 주소 충돌 차단, 전송 여부 구분. */
+/* 유승빈 DB추출기 v3.23 — 최신 사업자조회, 주소 충돌 차단, 전송 여부 구분. */
 'use strict';
 const COMPANY_ORIGIN = 'https://xn--2e5b11e.xn--hz2b15nnvd67o.shop';
 const BUSINESS_LOOKUP_ORIGIN = 'http://smartwin.iptime.org:8070';
@@ -100,6 +100,18 @@ async function saveCompanyCache(mallId,business,signal){
   });
   if(!res.ok||res.type==='opaqueredirect')throw Error('회사 캐시 저장 실패 HTTP '+res.status);
 }
+function safeServerMessage(payload){
+  const raw=typeof payload==='string'?payload:payload?.detail||payload?.message||payload?.error||payload?.reason||'';
+  const text=typeof raw==='string'?raw:Array.isArray(raw)?raw.map(x=>x?.msg||'').join(' / '):typeof raw?.message==='string'?raw.message:'';
+  if(/NID_AUT|NID_SES|JSESSIONID|cookie|authorization|token|password/i.test(text))return '인증 관련 내용 포함: 원문 생략';
+  return text.replace(/https?:\/\/[^\s"'<>]+/gi,'[주소]').replace(/[<>]/g,'').replace(/[\r\n\t]+/g,' ').slice(0,300);
+}
+async function serverFailure(res,endpoint,label){
+  let detail='';
+  try{const body=(await res.text()).slice(0,50000);try{detail=safeServerMessage(JSON.parse(body));}catch{detail=/^\s*</.test(body)?'HTML 오류 응답 (서버 경로/로그인 확인)':safeServerMessage(body);}}catch{}
+  const error=new Error(label+' HTTP '+res.status+(detail?' · '+detail:''));
+  Object.assign(error,{httpStatus:res.status,endpoint,serverMessage:detail});return error;
+}
 async function lookupLatest(storeUrl,mallId,signal,cookies,beforeRequest){
   const safeUrl=storeBaseUrl(storeUrl);
   if(!safeUrl)throw Error('실제 스토어 주소를 확인하지 못했습니다.');
@@ -110,9 +122,9 @@ async function lookupLatest(storeUrl,mallId,signal,cookies,beforeRequest){
     cache:'no-store',referrerPolicy:'no-referrer',redirect:'error',
     body:JSON.stringify({url:safeUrl,...cookies}),signal
   });
-  if(!res.ok)throw Error('최신 사업자조회 서버 HTTP '+res.status);
+  if(!res.ok)throw await serverFailure(res,'/store/seller-info','최신 사업자조회 서버');
   const payload=await readJson(res,'최신 사업자조회');
-  if(payload.success!==true)throw Error('최신 조회 서버 응답 실패 (사업자조회기 원본과 비교 필요)');
+  if(payload.success!==true){const detail=safeServerMessage(payload);throw Object.assign(new Error('최신 조회 서버 응답 실패'+(detail?' · '+detail:'')),{httpStatus:res.status,endpoint:'/store/seller-info',serverMessage:detail});}
   if(!payload.sellerInfo||typeof payload.sellerInfo!=='object'||Array.isArray(payload.sellerInfo)||
      ![payload.sellerInfo.identity,payload.sellerInfo.representName,payload.sellerInfo.representativeName,
        payload.sellerInfo.businessAddressInfo?.fullAddressInfo,payload.sellerInfo.businessAddressInfo?.address,
@@ -162,9 +174,9 @@ async function lookupByNumbers(mallId,mid,signal,beforeRequest,channelProductNo)
   const res=await fetch(BUSINESS_LOOKUP_ORIGIN+'/extension/business-info?'+query,{
     method:'GET',credentials:'omit',cache:'no-store',redirect:'error',referrerPolicy:'no-referrer',signal
   });
-  if(!res.ok)throw Error('번호 기반 사업자조회 HTTP '+res.status);
+  if(!res.ok)throw await serverFailure(res,'/extension/business-info','번호 기반 사업자조회');
   const payload=await readJson(res,'번호 기반 사업자조회');
-  if(payload.success===false)throw Error('번호 기반 사업자조회 실패');
+  if(payload.success===false){const detail=safeServerMessage(payload);throw Object.assign(new Error('번호 기반 사업자조회 실패'+(detail?' · '+detail:'')),{httpStatus:res.status,endpoint:'/extension/business-info',serverMessage:detail});}
   const raw=payload.data&&typeof payload.data==='object'?payload.data:payload;
   if(raw.mallSeq&&String(raw.mallSeq)!==mallId)throw Error('번호 조회 응답 판매자 불일치');
   if(raw.syncNvMid&&String(raw.syncNvMid)!==String(mid))throw Error('번호 조회 응답 쇼핑 상품번호 불일치');
@@ -204,7 +216,7 @@ async function executePreparedBusinessLookup(prepared,mallSeq,hooks={}){
       catch(e){warning='조회 성공 · 회사 캐시 저장 실패: '+String(e?.message||e);}
       return {success:true,data:business,origin:numberLookup?'number-api':'latest-api',attempted:true,warning};
     }finally{clearTimeout(timer);hooks.signal?.removeEventListener('abort',cancel);}
-  }catch(e){const msg=String(e?.message||e);return {success:false,error:msg,
+  }catch(e){const msg=String(e?.message||e);return {success:false,error:msg,httpStatus:e.httpStatus||null,endpoint:e.endpoint||'',serverMessage:e.serverMessage||'',
     code:/로그인|인증|쿠키/i.test(msg)?'AUTH_REQUIRED':/NO_SELLER_DETAILS/.test(msg)?'NO_SELLER_DETAILS':numberLookup?'NUMBER_API_ERROR':'LATEST_API_ERROR',attempted};}
 }
 async function getBusinessInfo(mallSeq,syncNvMid,observedStoreUrl,productUrl,statusStoreUrl='',statusProductUrl=''){

@@ -1,4 +1,4 @@
-/* 유승빈 DB추출기 v3.22: 상품·판매자 식별 검증 및 연락처 정규화 */
+/* 유승빈 DB추출기 v3.23: 상품·판매자 식별 검증 및 연락처 정규화 */
 (function (root) {
   'use strict';
   const str = v => String(v == null ? '' : v).trim();
@@ -113,7 +113,7 @@
     if(base&&expected&&(!evidence.length||placeholder))return `${base}/products/${expected}`;
     return '';
   };
-  // v3.22: 화면의 여러 상품, 원부 API 결과와 검증된 기존 연결 정보에서
+  // v3.23: 화면의 여러 상품, 원부 API 결과와 검증된 기존 연결 정보에서
   // 같은 mallSeq의 실제 스토어 URL만 공유합니다. 업체명/숫자로 슬러그를 추측하지 않습니다.
   const enrichStoreUrls = (products, verifiedStoreMap={}) => {
     const groups=new Map(),conflicts=[];

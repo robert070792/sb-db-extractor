@@ -12,17 +12,17 @@ test('advertisement without a store URL uses mallSeq + shopping nvMid, not the c
  let e;let cookies=0;
  e=await runtime({noAuth:true,fetch:async(url,init,next)=>{
   if(url.includes('/extension/business-info?')){
-   const u=new URL(url);assert.equal(u.searchParams.get('mallSeq'),'460325');assert.equal(u.searchParams.get('syncNvMid'),'90082614314');
+   const u=new URL(url);assert.equal(u.searchParams.get('mallSeq'),'1367436');assert.equal(u.searchParams.get('syncNvMid'),'90082614314');
    assert.equal(init.credentials,'omit');assert.equal(init.referrerPolicy,'no-referrer');assert.equal(init.headers,undefined);assert.equal(init.body,undefined);
-   assert.equal(e.disk[ledgerKey]['460325'].status,'requested');
-   return response({phoneNumber:'010-2345-6789',companyName:'Synthetic business',storeUrl:'https://brand.naver.com/mixandmatch'});
+   assert.equal(e.disk[ledgerKey]['1367436'].status,'requested');
+   return response({phoneNumber:'010-2345-6789',companyName:'Synthetic business',storeUrl:'https://brand.naver.com/synthetic-store'});
   }return next(url,init);
  }});
  e.chrome.cookies.get=()=>{cookies++;throw Error('Number lookup must not read Naver cookies');};
- const s=e.api.setState({pending:[item({mallSeq:'460325',nvMid:'90082614314',chnlProdNo:'12538103461',storeUrl:'',storeName:'',isAd:true})],total:1});
+ const s=e.api.setState({pending:[item({mallSeq:'1367436',nvMid:'90082614314',chnlProdNo:'12538103461',storeUrl:'',storeName:'',isAd:true})],total:1});
  await e.api.processPending(e.api.setJob());
  assert.equal(cookies,0);assert.equal(numberCalls(e).length,1);assert.equal(latestCalls(e).length,0);
- assert.equal(s.matched.length,1);assert.equal(s.matched[0].memo,'검색광고');assert.equal(s.matched[0].productUrl,'https://brand.naver.com/mixandmatch/products/12538103461');
+ assert.equal(s.matched.length,1);assert.equal(s.matched[0].memo,'검색광고');assert.equal(s.matched[0].productUrl,'https://brand.naver.com/synthetic-store/products/12538103461');
  assert.equal(s.statistics.bizLegacy,1);assert.equal(s.statistics.bizStoreRecovered,1);
 });
 for(const phone of ['02-123-4567','010-9529-****',''])for(const storeUrl of ['', 'https://brand.naver.com/expected']){

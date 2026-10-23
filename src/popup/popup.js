@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded',()=>{
       $('stage').textContent=state.error||state.stage||'';
       $('resume').disabled=!(state.paused||(!state.running&&(state.collection||state.pending?.length)));
       $('pause').disabled=!state.running||!!state.paused;
-      $('stop').disabled=!state.running||!state.collection;
+      $('stop').disabled=!state.running;
       $('stop').textContent=state.collection?.source==='plus'?'■ 수집 종료 후 업체 조회':'■ 전체 중단';
     }catch(e){$('state').textContent='오류: '+e.message;}
   }
