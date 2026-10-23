@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "유승빈 DB추출기",
+  "version": "3.22",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "description": "실제 검색·숫자 버튼 이동, 판매자 매칭 검증, 010 후보 보존, 수집 누락 진단 및 중복조회 방지",
+  "permissions": [
+    "scripting",
+    "storage",
+    "tabs",
+    "cookies"
+  ],
+  "host_permissions": [
+    "https://search.shopping.naver.com/*",
+    "https://xn--2e5b11e.xn--hz2b15nnvd67o.shop/*",
+    "https://fast.storeart.kr/*",
+    "https://www.naver.com/*",
+    "https://smartstore.naver.com/*",
+    "https://brand.naver.com/*",
+    "http://smartwin.iptime.org:8070/*"
+  ],
+  "background": {
+    "service_worker": "src/background-entry.js"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_popup": "src/popup/popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://search.shopping.naver.com/search/*",
+        "https://search.shopping.naver.com/ns/*"
+      ],
+      "js": [
+        "src/extract/panel.js"
+      ],
+      "css": [
+        "src/extract/panel.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
