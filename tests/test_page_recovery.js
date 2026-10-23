@@ -2,9 +2,9 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {runtime,item}=require('./helpers/runtime.cjs');
 test('recovery clicks the previous and target number, with no tab URL update',async()=>{
   const e=await runtime(),j=e.api.setJob(),clicks=[];let page=2;
-  e.api.override({scrollFooter:async()=>{},scrollTop:async()=>{},inspectPager:async()=>({domCurrent:page}),
+  e.api.override({scrollFooter:async()=>{},scrollTop:async()=>{},inspectPager:async()=>({domCurrent:page}),inspect:async()=>({records:[item({observedPage:page,searchRequestId:'returned-baseline'})]}),
     clickPage:async(_,next)=>{clicks.push(next);page=next;return {ok:true,clickedPage:next};},
-    waitForPricePageChange:async()=>({actual:2,proof:'changed products'})});
+    waitForPricePageChange:async(_,__,___,baseline)=>{assert.deepEqual(Array.from(baseline.requests),['returned-baseline']);return {actual:2,proof:'changed products'};}});
   const result=await e.api.recoverPricePage(j,1,'test',2,1,'original');
   assert.equal(result.actual,2);assert.deepEqual(clicks,[1,2]);
 });

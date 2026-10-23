@@ -1,0 +1,37 @@
+{
+  "version": "3.24",
+  "testFiles": 14,
+  "testUnits": 116,
+  "passed": 116,
+  "failed": 0,
+  "javascriptSyntaxFiles": 23,
+  "pythonSyntaxPassed": true,
+  "zipCRCValid": true,
+  "zipSourceBytesMatch": true,
+  "isolatedNpmCiPassed": true,
+  "isolatedZipTestsPassed": 116,
+  "olderArchivesUnchanged": [
+    "3.21",
+    "3.22",
+    "3.23"
+  ],
+  "sha256": "0ce981cd82d80c89e597baad7a9a4739d348859bad95a744b536b25736159185",
+  "userHTMLReplay": {
+    "version": "3.24",
+    "source": "user supplied shopping page 2 body, offline DOM replay",
+    "representativeCandidates": 52,
+    "identifiedRepresentatives": 52,
+    "ordinary": 21,
+    "advertisements": 12,
+    "catalogRepresentatives": 19,
+    "unresolvedCandidates": 0,
+    "selectedDOMPage": 2,
+    "simulatedStaleURLPage": 1,
+    "selectedPageMethod": "페이지네이션 내 활성 번호",
+    "networkRequests": 0,
+    "reportedFalsePageSuccessNowRejected": true,
+    "realServerVerified": false
+  },
+  "realNaverAndCompanyAPIVerified": false,
+  "numberEndpoint404Resolved": false
+}

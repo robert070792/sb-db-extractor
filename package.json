@@ -1,6 +1,6 @@
 {
   "name": "sb-db-extractor",
-  "version": "3.23.0",
+  "version": "3.24.0",
   "private": true,
   "description": "Chrome extension regression checks; production extension has no npm runtime dependencies.",
   "scripts": {

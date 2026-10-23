@@ -72,9 +72,9 @@ test('failed new reservation restores previous run audit record without sending'
  await e.api.processPending(e.api.setJob());assert.equal(numberCalls(e).length,0);assert.equal(e.api.ledger['100'].runId,'old');
 });
 function listing(page,request,extra={}){return {records:[1,2,3].map(n=>item({mallSeq:String(100+n),chnlProdNo:String(111+n),nvMid:String(1000+n),observedPage:page,searchRequestId:request,...extra}))};}
-test('same product IDs on a newly identified search response can confirm page 2',async()=>{
+test('same product IDs require a successful target-page response as well as refreshed metadata',async()=>{
  const e=await runtime(),j=e.api.setJob(),before=e.api.pageEvidence(listing(1,'old'));
- e.api.override({inspect:async()=>listing(2,'new'),inspectPager:async()=>({domCurrent:2,urlPage:1,numbers:[1,3]})});
+ e.api.override({inspect:async()=>({...listing(2,'new'),url:'https://search.shopping.naver.com/search/all?query=test',lifecycle:{fromPage:1,targetPage:2,ageMs:3000,quietMs:1000,responses:[{page:2,status:200,query:'test'}]}}),inspectPager:async()=>({domCurrent:2,urlPage:1,numbers:[1,3]})});
  const result=await e.api.waitForPricePageChange(j,1,2,before,1,8000);
  assert.equal(result.actual,2);assert.equal(j.pageProof.requestProof,true);assert.equal(e.api.state.pageTransitions[0].listChanged,false);
  assert.equal(e.api.state.pageTransitions[0].requestChanged,true);
@@ -94,12 +94,12 @@ test('rotating only an advertisement does not prove the organic list changed',as
 test('page 2 repeat observations are audited, not dropped, when a new response is proven',async()=>{
  const e=await runtime(),j=e.api.setJob(),first=listing(1,'old').records,second=listing(2,'new').records;
  const c={from:1,to:2,nextPage:1,products:[],catalogProcessed:{},searchUrl:'https://search.shopping.naver.com/search/all?query=test'};
- e.api.setState({collection:c});e.api.override({navigatePrice:async(_,__,___,p)=>{j.pageProof={page:p,requestProof:p===2,requests:['new']};},
+ e.api.setState({collection:c});e.api.override({navigatePrice:async(_,__,___,p)=>{j.pageProof={page:p,requestProof:p===2,lifecycleProof:p===2,requests:['new']};},
   loadScrollPage:async(_,__,p)=>({products:p===1?first:second,ads:0,scan:{rawUnique:3,representativeCandidates:3,reconciledRepresentativeCount:3,terminationReason:'bottom-stable'}}),
   expandCatalogsOnPage:async()=>({expanded:[],counts:{}})});
  await e.api.collectPrice(j,c,'test');
  assert.equal(e.api.state.pageStats.length,2);assert.equal(e.api.state.pageStats[1].products,3);assert.equal(e.api.state.pageStats[1].newItems,0);
- assert.equal(e.api.state.auditPages[1].repeatedProductsWithNewResponse,true);assert.equal(c.products.length,3);
+ assert.equal(e.api.state.auditPages[0].repeatedProductsWithNewResponse,false);assert.equal(e.api.state.auditPages[1].repeatedProductsWithNewResponse,true);assert.equal(c.products.length,3);
 });
 test('ad HTML shape captures numeric nvMid and search request proof without resolving or clicking the ad',async()=>{
  const e=await runtime(),dom=new JSDOM('<li class="product_item_fixture"><a></a></li>',{url:'https://search.shopping.naver.com/search/all?query=test',runScripts:'outside-only'});

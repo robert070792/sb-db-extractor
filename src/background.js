@@ -1,4 +1,4 @@
-/* 유승빈 DB추출기 v3.23 — 최신 사업자조회, 주소 충돌 차단, 전송 여부 구분. */
+/* 유승빈 DB추출기 v3.24 — 최신 사업자조회, 주소 충돌 차단, 전송 여부 구분. */
 'use strict';
 const COMPANY_ORIGIN = 'https://xn--2e5b11e.xn--hz2b15nnvd67o.shop';
 const BUSINESS_LOOKUP_ORIGIN = 'http://smartwin.iptime.org:8070';

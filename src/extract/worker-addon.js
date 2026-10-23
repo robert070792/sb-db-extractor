@@ -1,4 +1,4 @@
-/* 유승빈 DB추출기 v3.23: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
+/* 유승빈 DB추출기 v3.24: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
 (() => {
   'use strict';
   const KEY='sb_leads_v20_state'; // chrome.storage.local: 컴퓨터 + Chrome 프로필별, sync 사용 안 함
@@ -14,7 +14,7 @@
   const clock=()=>new Date().toLocaleTimeString('ko-KR');
   const str=v=>String(v==null?'':v);
   const blankStats=()=>({filtered:0,duplicate:0,unknownReviews:0,unknownGroup:0,adsExcluded:0,sameSeller:0,invalidSeller:0,selected:0,checked:0,new:0,absent:0,rejected:0,paid:0,paymentScheduled:0,sameBranch:0,otherBranch:0,unknown:0,excluded:0,no010:0,businessDuplicates:0,lookupPrevented:0,bizCached:0,bizLatest:0,bizLegacy:0,bizErrors:0,bizUrlMissing:0,bizAuthErrors:0,bizUrlMissingAds:0,bizUrlMissingCatalogs:0,bizStoreRecovered:0,bizStoreConflicts:0,bizNoDetails:0});
-  const blank=()=>({runId:Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),pageTransitions:[],settings:{},basic:[],seen:[],lookupAttempted:[],businessIndex:{},statistics:blankStats(),pending:[],collection:null,running:false,paused:false,phase:'대기 중',stage:'',startedAt:0,finishedAt:0,processed:0,total:0,scanned:0,page:0,pageTotal:0,matched:[],review:[],logs:[],error:'',discovered:0,ads:0,keyword:'',source:'',mode:'',searchUrl:'',skipped:0,pageStats:[],auditPages:[],auditRows:[],auditTruncated:0,catalogDiagnostics:[],phoneDuplicates:0,currentStore:'',unidentifiedWarnings:0,catalogWarnings:0,catalogExpanded:0,catalogBlockedReason:"",incompletePages:[],plusBatchSize:PLUS_BATCH});
+  const blank=()=>({runId:Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),pageTransitions:[],settings:{},basic:[],seen:[],lookupAttempted:[],businessIndex:{},statistics:blankStats(),pending:[],collection:null,running:false,paused:false,phase:'대기 중',stage:'',startedAt:0,finishedAt:0,processed:0,total:0,scanned:0,page:0,pageTotal:0,matched:[],review:[],logs:[],error:'',discovered:0,ads:0,keyword:'',source:'',mode:'',searchUrl:'',skipped:0,pageStats:[],auditPages:[],auditRows:[],auditTruncated:0,catalogDiagnostics:[],phoneDuplicates:0,currentStore:'',unidentifiedWarnings:0,unidentifiedUniqueCandidates:0,unidentifiedObservationCount:0,catalogWarnings:0,catalogExpanded:0,catalogBlockedReason:"",incompletePages:[],plusBatchSize:PLUS_BATCH});
   let state=null,job=null,lookupLedger={},rememberedStores={},storeSaveQueue=Promise.resolve();
   function sourceUrl(raw){
     try{const u=new URL(raw);if(u.origin!==SHOP_ORIGIN||!u.searchParams.get('query'))return null;
@@ -376,18 +376,25 @@
       const observedProductUrls=[...new Set([...ownDataUrls,...ownLinkUrls,...candidates].flatMap(raw=>nestedProductUrls(raw)))];
       records.push({mallSeq,nvMid,chnlProdNo,chnlNo:sellerChannel,title,storeName,productUrl,observedProductUrl:productUrl,observedProductUrls,storeUrl,storeUrlCandidates,identityConflict,identityIssues,isAd,reviews,sellerCount,catalogNvMid,catalogUrlId,catalogType,cCatalogId,standardFlag,isNaverStore,advertiserType,brandstoreType,observedPage,searchRequestId,representativeKey:primaryArea?representativeKey(a):'',discoveryMethod:isLegacyCandidate?'legacy':'primary'});
     }
-    // 판매자번호가 없는 원부 대표카드도 실제 /catalog/<id> 링크가 있으면 판매처 조회 대상으로 보존한다.
+    // 판매자번호 없는 원부 대표카드: 직접 링크 또는 일치하는 원부 메타+추적 링크를 보존한다.
     for(const a of representativeAnchors){
       const area=String(a.getAttribute('data-shp-area')||'');
       if(!/^(lst\*|lst\.)/.test(area)||!representativeArea.test(area))continue;
       const key=representativeKey(a);if(records.some(x=>x.representativeKey===key))continue;
       let catalogUrlId='';try{const u=new URL(a.href);if(u.origin===location.origin)catalogUrlId=(u.pathname.match(/^\/catalog\/(\d+)\/?$/)||[])[1]||'';}catch{}
-      if(!catalogUrlId||records.some(x=>x.catalogUrlId===catalogUrlId&&x.isCatalogRepresentative))continue;
       const det=parse(a.getAttribute('data-shp-contents-dtl'));
+      let catalogEvidenceSource=catalogUrlId?'direct-catalog-link':'';
+      if(!catalogUrlId&&/^lst\*C\.(?:title|tit|img|image|prodTitle)$/.test(area)){
+        const id=numeric(a.getAttribute('data-shp-contents-id'));
+        try{const u=new URL(a.href);
+          if(det.std_yn==='y'&&id&&numeric(det.catalog_nv_mid)===id&&u.protocol==='https:'&&u.hostname==='cr.shopping.naver.com'&&!u.username&&!u.password&&!u.port&&u.pathname==='/adcr'&&u.searchParams.get('nvMid')===id){catalogUrlId=id;catalogEvidenceSource='search-catalog-metadata';}
+        }catch{}
+      }
+      if(!catalogUrlId||records.some(x=>x.catalogUrlId===catalogUrlId&&x.isCatalogRepresentative))continue;
       let log={};try{log=JSON.parse(a.getAttribute('data-nlog-params')||'{}');}catch{}
       const pageItem=(log.filter_con?.items||[]).find(x=>x?.key==='pgn');
       let catalogType='',cCatalogId='';try{const u=new URL(a.href);catalogType=u.searchParams.get('catalogType')||'';cCatalogId=numeric(u.searchParams.get('cCatalogId'));}catch{}
-      records.push({mallSeq:'',nvMid:numeric(a.getAttribute('data-shp-contents-id'))||catalogUrlId,chnlProdNo:'',chnlNo:'',title:pick(a.getAttribute('title'),a.textContent,det.prod_nm),storeName:'',productUrl:'',storeUrl:'',isAd:log.is_ad===true||log.is_ad==='true'||a.getAttribute('data-shp-contents-grp')==='ad',reviews:null,sellerCount:null,catalogNvMid:numeric(det.catalog_nv_mid)||catalogUrlId,catalogUrlId,catalogType,cCatalogId,isNaverStore:false,isCatalogRepresentative:true,observedPage:pageItem&&/^\d+$/.test(String(pageItem.value))?Number(pageItem.value):null,representativeKey:key,discoveryMethod:'catalog-representative'});
+      records.push({mallSeq:'',nvMid:numeric(a.getAttribute('data-shp-contents-id'))||catalogUrlId,chnlProdNo:'',chnlNo:'',title:pick(a.getAttribute('title'),a.textContent,det.prod_nm),storeName:'',productUrl:'',storeUrl:'',isAd:log.is_ad===true||log.is_ad==='true'||a.getAttribute('data-shp-contents-grp')==='ad',reviews:null,sellerCount:null,catalogNvMid:numeric(det.catalog_nv_mid)||catalogUrlId,catalogUrlId,catalogType,cCatalogId,catalogEvidenceSource,isNaverStore:false,isCatalogRepresentative:true,observedPage:pageItem&&/^\d+$/.test(String(pageItem.value))?Number(pageItem.value):null,representativeKey:key,discoveryMethod:'catalog-representative'});
     }
     const bodyText=(document.body?.innerText||'').slice(0,8000);
     const challenge=/(자동입력|자동 입력|보안문자|보안 문자|비정상적인 접근|비정상적인 요청|로봇이 아닙니다|captcha|자동화된 접근|숫자를 입력|문자를 입력|자동등록방지)/i.test(bodyText)&&records.length===0;
@@ -438,7 +445,7 @@
     let domCurrent=null,method='페이지 번호 미확인';
     if(group){
       const active=[...group.root.querySelectorAll('[aria-current="page"],[aria-selected="true"],[class*="active"],[class*="current"],strong')].filter(visible);
-      const vals=[...new Set(active.map(el=>Number((el.textContent||'').trim())).filter(n=>Number.isInteger(n)&&n>=1&&n<=10))];
+      const vals=[...new Set(active.map(el=>{const copy=el.cloneNode(true);for(const hint of copy.querySelectorAll('.blind,.sr-only,[aria-hidden="true"]'))hint.remove();return Number((copy.textContent||'').trim());}).filter(n=>Number.isInteger(n)&&n>=1&&n<=10))];
       if(vals.length===1){domCurrent=vals[0];method='페이지네이션 내 활성 번호';}
     }
     if(domCurrent===null&&numbers.length===9){const missing=Array.from({length:10},(_,i)=>i+1).filter(n=>!numbers.includes(n));if(missing.length===1){domCurrent=missing[0];method='실제 숫자 링크에서 누락된 페이지';}}
@@ -904,8 +911,9 @@
       const keyword=(()=>{try{return new URL(data.url||'').searchParams.get('query')||'';}catch{return '';}})();
       const responseProof=!!(tied&&metadataProof&&life.responses?.some(x=>x.page===target&&x.status>=200&&x.status<300&&(!keyword||x.query===keyword)));
       const lifecycleProof=renderProof||responseProof;
-      const proven=domTarget&&conflicting===0&&!data.loading&&(listingProof||requestProof||lifecycleProof);
-      const transition={expectedPage,beforePage,actualPage:target,lifecycle:data.lifecycle||null,loading:!!data.loading,hiddenAnchors:data.hiddenAnchors||0,renderProof,responseProof,domCurrent:pager.domCurrent,urlPage:pager.urlPage,listChanged,organicChanged,requestChanged,matching,observed:observed.length,before,after:evidence};
+      // 검색응답 ID는 추적 메타입니다. 변경만으로 목표 페이지 응답이라고 확정하지 않습니다.
+      const proven=domTarget&&conflicting===0&&!data.loading&&(listingProof||lifecycleProof);
+      const transition={expectedPage,beforePage,actualPage:target,requestMetadataProof:requestProof,lifecycle:data.lifecycle||null,loading:!!data.loading,hiddenAnchors:data.hiddenAnchors||0,renderProof,responseProof,domCurrent:pager.domCurrent,urlPage:pager.urlPage,listChanged,organicChanged,requestChanged,matching,observed:observed.length,before,after:evidence};
       j.lastPageTransition=transition;
       lastState=`페이지 링크 현재 ${pager.domCurrent??'-'}, URL ${pager.urlPage??'-'}, 상품변경 ${listChanged?'예':'아니오'}, 상품 pgn ${matching}/${observed.length}, 검색응답 변경 ${requestChanged?'예':'아니오'}, 보이는 번호 ${(pager.numbers||[]).join(',')}`;
       if(!proven||Date.now()-started<1750){stable=0;lastFingerprint='';continue;}
@@ -915,7 +923,7 @@
       // 상품이 같아도 새 렌더링/페이지 응답과 목표 페이지 메타가 일치하면 페이지별 관측으로 보존합니다.
       j.pageProof={page:target,requestProof,lifecycleProof,signature:sig,requests:evidence.requests};
       state.pageTransitions.push({...transition,result:'confirmed'});state.pageTransitions=state.pageTransitions.slice(-100);
-      return {data,pager,actual:target,proof:lifecycleProof?'실제 페이지 선택·상품 렌더링/페이지 응답 확인':requestProof&&!listChanged?'실제 숫자 버튼·새 검색응답·상품 페이지 일치':'실제 숫자 버튼·상품 목록 갱신 확인'};
+      return {data,pager,actual:target,proof:lifecycleProof?'실제 페이지 선택·상품 렌더링/페이지 응답 확인':'실제 숫자 버튼·상품 목록 갱신 확인'};
     }
     if(j.lastPageTransition){state.pageTransitions.push({...j.lastPageTransition,result:'unverified'});state.pageTransitions=state.pageTransitions.slice(-100);await save();}
     throw Error(`페이지 이동 확인 실패 (${lastState||'페이지 응답 없음'}). 실제 페이지 버튼 또는 상품 로딩을 확인하세요.`);
@@ -929,20 +937,26 @@
     await scrollFooter(tabId);await pause(300);
     const back=await clickPage(tabId,fromPage,targetPage);
     if(!back?.ok||back.clickedPage!==fromPage)throw Error(`페이지 복구 중 ${fromPage}페이지 버튼을 찾지 못했습니다. 기존 수집 내역은 보존됩니다.`);
-    // 첫 페이지의 원래 상품 목록을 보던 상황이므로 복귀 중에는 번호만 확인하고,
-    // 목표 페이지로 이동할 때는 다시 상품 목록 변경을 강제 검증합니다.
-    let backConfirmed=false;
-    for(let i=0;i<14;i++){
-      await waitIfPaused(j);await pause(350);
-      const pager=await inspectPager(tabId);
-      if(pager?.domCurrent===fromPage){backConfirmed=true;break;}
+    // 복귀 페이지의 상품 로딩과 메타가 안정된 뒤 새로운 비교 기준을 잡습니다.
+    let baseline=null,last='',stableSince=0;
+    const deadline=Date.now()+15000;
+    while(Date.now()<deadline){
+      await waitIfPaused(j);await pause(350);assertActive(j);
+      const [data,pager]=await Promise.all([inspect(tabId),inspectPager(tabId)]);
+      const rows=data?.records||[];
+      const tagged=rows.map(x=>x.observedPage).filter(Number.isInteger);
+      const ready=pager?.domCurrent===fromPage&&!data?.loading&&!data?.challenge&&rows.length>0&&tagged.length>=Math.min(3,rows.length)&&tagged.every(n=>n===fromPage);
+      const evidence=pageEvidence(data||{}),fingerprint=ready?[evidence.signature,evidence.requests.join(',')].join('|'):'';
+      if(!ready||fingerprint!==last){last=fingerprint;stableSince=Date.now();baseline=null;continue;}
+      if(Date.now()-stableSince>=1800){baseline=evidence;break;}
     }
-    if(!backConfirmed)throw Error(`${keyword} ${targetPage}페이지 복구 실패: 원래 ${fromPage}페이지 번호를 확인하지 못했습니다.`);
+    if(!baseline)throw Error(`${keyword} ${targetPage}페이지 복구 실패: ${fromPage}페이지 상품 로딩 완료를 확인하지 못했습니다.`);
+    j.pageProof=null;
     await scrollFooter(tabId);await pause(450);
     const forward=await clickPage(tabId,targetPage,fromPage);
     if(!forward?.ok||forward.clickedPage!==targetPage)throw Error(`${keyword} ${targetPage}페이지 복구 실패: 실제 페이지 번호 버튼을 누르지 못했습니다.`);
     await scrollTop(tabId);
-    return await waitForPricePageChange(j,tabId,targetPage,beforeSignature,fromPage,18000);
+    return await waitForPricePageChange(j,tabId,targetPage,baseline,fromPage,18000);
   }
   async function navigatePrice(j,tabId,keyword,targetPage){
     assertActive(j);await waitIfPaused(j);
@@ -1078,7 +1092,7 @@
     if(state.auditRows.length>=12000){state.auditTruncated=(state.auditTruncated||0)+1;return;}
     state.auditRows.push({keyword,page,source,decision,mallSeq:str(item.mallSeq),nvMid:str(item.nvMid),
       channelProductNo:str(item.chnlProdNo),storeName:str(item.storeName),storeUrl:str(item.storeUrl),productName:str(item.title),
-      catalogNvMid:str(item.catalogNvMid),sellerCount:item.sellerCount??'',isAd:item.isAd===true?'Y':'N',reviews:item.reviews??'',
+      representativeKey:str(item.representativeKey||item.key),catalogEvidenceSource:str(item.catalogEvidenceSource),catalogNvMid:str(item.catalogNvMid),sellerCount:item.sellerCount??'',isAd:item.isAd===true?'Y':'N',reviews:item.reviews??'',
       advertiserType:str(item.advertiserType),discoveryMethod:str(item.discoveryMethod||'catalog'),productUrl:C.cleanProductUrl(item.productUrl,item.storeUrl,item.chnlProdNo),observedProductUrl:str(item.observedProductUrl||item.productUrl),identityIssues:(item.identityIssues||[]).join(' / '),catalogVerified:!!item.catalogVerified,catalogEvidence:item.catalogEvidence||'원부 확정 근거 미확보',specialNotes:C.flagList(item).join(', ')});
   }
   function recordScanAudit(audit,scan={},keyword,page){
@@ -1088,7 +1102,10 @@
       scanLegacyWideUnique:scan.legacyWideUnique||0,scanLegacySellerWideUnique:scan.legacySellerWideUnique||0,scanLegacyWideOnlyUnique:scan.legacyWideOnlyUnique||0,
       scanLegacyRejectedReasons:scan.legacyRejectedReasons||{},scanLegacyRejectedSamples:scan.legacyRejectedSamples||[],scanLegacySafeUnique:scan.legacySafeUnique||0,scanLegacyAmbiguousUnique:scan.legacyAmbiguousUnique||0,scanStrictUnique:scan.strictUnique||0,scanLegacyAddedUnique:scan.legacyAddedUnique||0});
     audit.scanCoverageUnverified=Array.isArray(scan.unresolvedCandidates)?scan.unresolvedCandidates.length:Math.max(0,audit.scanRepresentativeCandidates-(scan.reconciledRepresentativeCount??audit.scanRawUnique));
-    for(const row of scan.unresolvedCandidates||[])addAuditRow(row,keyword,page,'미식별 대표상품',`수집 미완료: ${row.reason||'상품 식별 근거 부족'}`);
+    for(const row of scan.unresolvedCandidates||[])addAuditRow({...row,discoveryMethod:'unresolved'},keyword,page,'미식별 대표상품',`수집 미완료: ${row.reason||'상품 식별 근거 부족'}`);
+    const unidentified=(state.auditRows||[]).filter(x=>x.source==='미식별 대표상품');
+    state.unidentifiedUniqueCandidates=new Set(unidentified.map(x=>x.representativeKey||[x.mallSeq,x.nvMid,x.nvMid?'':x.productName].join(':'))).size;
+    state.unidentifiedObservationCount=unidentified.length;
     if(scan.incomplete){
       const label=`${keyword} ${page}페이지 (스크롤 미완료: ${scan.terminationReason})`;
       state.incompletePages=state.incompletePages||[];if(!state.incompletePages.includes(label))state.incompletePages.push(label);
@@ -1159,7 +1176,8 @@
         await log(j,`${keyword} ${p}페이지 수집 실패 · 이전 상품은 보존하고 부분 완료로 진행: ${str(e.message||e).slice(0,180)}`);await save();break;
       }
       const sig=result.products.map(x=>x.mallSeq+':'+x.nvMid).sort().join('|');
-      const repeatedWithProof=j.pageProof?.page===p&&result.products.every(x=>x.observedPage===p)&&((j.pageProof.requestProof&&result.products.every(x=>j.pageProof.requests.includes(x.searchRequestId)))||j.pageProof.lifecycleProof);
+      const repeatedPage=Boolean(previousSignature&&sig===previousSignature);
+      const repeatedWithProof=j.pageProof?.page===p&&result.products.every(x=>x.observedPage===p)&&j.pageProof.lifecycleProof===true;
       if(previousSignature&&sig===previousSignature&&!repeatedWithProof){
         await log(j,`${keyword} ${p}페이지에 이전 페이지 상품이 재등장했습니다. 완료 처리하지 않고 자동으로 재확인합니다.`);
         await scrollTop(j.tabId);await pause(1400);
@@ -1176,7 +1194,8 @@
       // 화면에서 일반상품처럼 보이는 카드도 catalog_nv_mid를 통해 카탈로그를 조회합니다.
       const catalogs=await expandCatalogsOnPage(j,c,keyword,p,result.products);
       const audit=reconcilePage(c,keyword,p,result.products,catalogs.expanded,catalogs.counts);
-      audit.repeatedProductsWithNewResponse=Boolean(previousSignature===sig&&repeatedWithProof);
+      audit.repeatedProductsWithNewResponse=Boolean(repeatedPage&&repeatedWithProof);
+      audit.repeatedProductsVerified=Boolean(repeatedPage&&repeatedWithProof);
       audit.pageDurationMs=Date.now()-pageStartedAt;
       recordScanAudit(audit,result.scan,keyword,p);
       audit.scanReconciledProducts=result.products.length;
@@ -1326,7 +1345,7 @@
     const audited=(state.auditPages||[]).reduce((a,x)=>a+x.searchProducts,0);
     const unresolved=(state.auditPages||[]).reduce((a,x)=>a+Math.max(x.scanUnidentifiedUnique||0,x.scanCoverageUnverified||0),0);
     if(unresolved){state.unidentifiedWarnings=unresolved;await save();}
-    await log(j,`수집 검증 · 검색결과 식별 상품 ${audited}개 · 대표상품 식별정보 부족 ${unresolved}개(보조 링크는 별도 진단) · 네이버 상품 후보 ${confirmed.length}개 · 업체 중복 ${filtered.stats.sameSeller}건 · 작업 중복 ${filtered.stats.duplicate}건 · 필터/식별 제외 ${filtered.stats.filtered+filtered.stats.adsExcluded+filtered.stats.unknownReviews+filtered.stats.unknownGroup+filtered.stats.invalidSeller}건 · 사업자 조회 대상 ${filtered.products.length}곳`);
+    await log(j,`수집 검증 · 검색결과 식별 관측 ${audited}건 · 미식별 후보 관측 ${unresolved}건 / 고유 후보 ${state.unidentifiedUniqueCandidates||0}개(보조 링크는 별도 진단) · 네이버 상품 후보 ${confirmed.length}개 · 업체 중복 ${filtered.stats.sameSeller}건 · 작업 중복 ${filtered.stats.duplicate}건 · 필터/식별 제외 ${filtered.stats.filtered+filtered.stats.adsExcluded+filtered.stats.unknownReviews+filtered.stats.unknownGroup+filtered.stats.invalidSeller}건 · 사업자 조회 대상 ${filtered.products.length}곳`);
     if(filtered.products.length>MAX_STORES)throw Error(`업체 ${filtered.products.length}곳으로 1회 조회 한도 ${MAX_STORES}곳 초과. 범위를 줄이세요.`);
     // 네이버에서 관찰한 정보만으로 생성하는 독립형 16열 CSV. 연락처·대표자·주소는 추정하지 않습니다.
     const now=new Date();const date=[now.getFullYear(),String(now.getMonth()+1).padStart(2,'0'),String(now.getDate()).padStart(2,'0')].join('-');
@@ -1556,7 +1575,7 @@
             await getState();
             if(state.pending?.length||state.collection)throw Error('이전 작업이 남아 있습니다. 이어하기 또는 작업 초기화를 사용하세요.');
             await requireCompanyAccess();
-            Object.assign(state,{runId:Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),pageTransitions:[],seen:[],matched:[],review:[],businessIndex:{},statistics:blankStats(),skipped:0,basic:[],running:true,paused:false,startedAt:Date.now(),finishedAt:0,logs:[],phase:'요청 접수',stage:'현재 네이버 탭에서 수집 시작',keyword,source:src,mode,searchUrl,settings,pageTotal:mode==='auto'?(src==='plus'?0:to-from+1):1,error:'',pageStats:[],auditPages:[],auditRows:[],auditTruncated:0,catalogDiagnostics:[],phoneDuplicates:0,currentStore:'',unidentifiedWarnings:0,catalogWarnings:0,catalogExpanded:0,catalogBlockedReason:"",catalogDiagnostics:[],incompletePages:[],total:0,processed:0});
+            Object.assign(state,{runId:Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),pageTransitions:[],seen:[],matched:[],review:[],businessIndex:{},statistics:blankStats(),skipped:0,basic:[],running:true,paused:false,startedAt:Date.now(),finishedAt:0,logs:[],phase:'요청 접수',stage:'현재 네이버 탭에서 수집 시작',keyword,source:src,mode,searchUrl,settings,pageTotal:mode==='auto'?(src==='plus'?0:to-from+1):1,error:'',pageStats:[],auditPages:[],auditRows:[],auditTruncated:0,catalogDiagnostics:[],phoneDuplicates:0,currentStore:'',unidentifiedWarnings:0,unidentifiedUniqueCandidates:0,unidentifiedObservationCount:0,catalogWarnings:0,catalogExpanded:0,catalogBlockedReason:"",catalogDiagnostics:[],incompletePages:[],total:0,processed:0});
             state.collection={source:src,mode,searchUrl,from,to,keywords,keywordIndex:0,nextPage:from,previousSignature:'',products:[],catalogProcessed:{},tabId:sender.tab.id};
             await save();await log(j,`${src==='plus'?'플러스스토어':'가격비교'} '${keywords.join(', ')}' ${mode==='auto'?(src==='plus'?`연속 스크롤 (${PLUS_BATCH}개마다 저장, 수집 종료 버튼까지)`:`${from}~${to}페이지 번호 클릭 추출`):'현재 화면 추출'} 시작 · 새 탭 생성 없음`);
             await runJob(j);

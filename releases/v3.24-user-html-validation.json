@@ -1,0 +1,16 @@
+{
+  "version": "3.24",
+  "source": "user supplied shopping page 2 body, offline DOM replay",
+  "representativeCandidates": 52,
+  "identifiedRepresentatives": 52,
+  "ordinary": 21,
+  "advertisements": 12,
+  "catalogRepresentatives": 19,
+  "unresolvedCandidates": 0,
+  "selectedDOMPage": 2,
+  "simulatedStaleURLPage": 1,
+  "selectedPageMethod": "페이지네이션 내 활성 번호",
+  "networkRequests": 0,
+  "reportedFalsePageSuccessNowRejected": true,
+  "realServerVerified": false
+}
