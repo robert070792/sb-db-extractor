@@ -1,0 +1,40 @@
+{
+  "version": "3.26",
+  "testFiles": 16,
+  "testUnits": 146,
+  "passed": 146,
+  "failed": 0,
+  "javascriptSyntaxFiles": 25,
+  "pythonSyntaxPassed": true,
+  "zipCRCValid": true,
+  "zipSourceBytesMatch": true,
+  "isolatedNpmCiPassed": true,
+  "isolatedZipTestsPassed": 146,
+  "olderArchivesUnchanged": [
+    "3.21",
+    "3.22",
+    "3.23",
+    "3.24",
+    "3.25"
+  ],
+  "sha256": "d4124cfd53371a8efd8c514f1ad4b89fda72193f9a036cd5dd5f32e1252cc316",
+  "userDiagnosticReplay": {
+    "version": "3.26",
+    "source": "user v3.25 diagnostic, offline HTTP 418 transition replay",
+    "observedProductEvidence": 54,
+    "preservedProductEvidence": 46,
+    "pageClicks": [
+      2
+    ],
+    "footerScrollsBeforeClick": 1,
+    "topScrollsAfterClick": 0,
+    "collectionScrolls": 0,
+    "businessRequests": 0,
+    "status": "페이지 확인 대기",
+    "httpStatusShown": 418,
+    "nextPage": 2,
+    "realServerVerified": false
+  },
+  "realNaverAndCompanyAPIVerified": false,
+  "naverHTTP418Resolved": false
+}

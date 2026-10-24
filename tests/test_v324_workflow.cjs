@@ -40,17 +40,16 @@ test('reported false success: new request ID and page metadata without render/re
  await assert.rejects(()=>e.api.waitForPricePageChange(j,1,2,e.api.pageEvidence(listing(1,'old')),1,4000),/페이지 이동 확인 실패/);
  assert.equal(e.api.state.pageTransitions[0].requestChanged,true);assert.equal(e.api.state.pageTransitions[0].result,'unverified');
 });
-test('recovery waits for delayed return-page loading and replaces the stale baseline',async()=>{
- let ms=0,clickedAt=0,selected=2;const e=await runtime({onPause:n=>ms+=n}),j=e.api.setJob(),clicks=[];
- e.api.override({scrollFooter:async()=>{},scrollTop:async()=>{},inspectPager:async()=>({domCurrent:selected}),
- inspect:async()=>ms-clickedAt<1400?{...listing(2,'stale'),loading:true}:listing(1,'returned-new'),
- clickPage:async(_,p)=>{if(p===2)assert(ms-clickedAt>=3200);clicks.push(p);selected=p;clickedAt=ms;return {ok:true,clickedPage:p};},
- waitForPricePageChange:async(_,__,target,baseline)=>{assert.equal(target,2);assert.deepEqual(Array.from(baseline.requests),['returned-new']);return {actual:2};}});
- assert.equal((await e.api.recoverPricePage(j,1,'test',2,1,e.api.pageEvidence(listing(1,'old')))).actual,2);assert.deepEqual(clicks,[1,2]);
+test('delayed target loading is verified without returning to the previous page',async()=>{
+ let ms=0,selected=1;const e=await runtime({onPause:n=>ms+=n}),j=e.api.setJob(),clicks=[];
+ e.api.override({scrollFooter:async()=>{},scrollTop:async()=>{throw Error('unexpected top scroll');},inspectPager:async()=>({domCurrent:selected}),
+ inspect:async()=>selected===1?listing(1,'old'):ms<3000?{...listing(2,'old'),loading:true}:{...listing(2,'new'),lifecycle:{fromPage:1,targetPage:2,ageMs:ms,quietMs:1000,organicAdded:3,organicRemoved:3,responses:[]}},
+ clickPage:async(_,p)=>{clicks.push(p);selected=p;return {ok:true,clickedPage:p};}});
+ await e.api.navigatePrice(j,1,'test',2);assert.deepEqual(clicks,[2]);assert(ms>=3000);assert.equal(j.pageProof.page,2);
 });
-test('recovery cannot click forward when previous page number changes but products never settle',async()=>{
- const e=await runtime(),j=e.api.setJob(),clicks=[];let page=2;e.api.override({scrollFooter:async()=>{},inspectPager:async()=>({domCurrent:page}),inspect:async()=>listing(2,'old'),clickPage:async(_,p)=>{clicks.push(p);page=p;return {ok:true,clickedPage:p};}});
- await assert.rejects(()=>e.api.recoverPricePage(j,1,'test',2,1,{}),/상품 로딩 완료/);assert.deepEqual(clicks,[1]);
+test('loading that never settles does not trigger recovery clicks',async()=>{
+ const e=await runtime(),j=e.api.setJob(),clicks=[];let page=1;e.api.override({scrollFooter:async()=>{},inspectPager:async()=>({domCurrent:page}),inspect:async()=>({...listing(page,'old'),loading:page===2}),clickPage:async(_,p)=>{clicks.push(p);page=p;return {ok:true,clickedPage:p};}});
+ await assert.rejects(()=>e.api.navigatePrice(j,1,'test',2),/페이지 이동 확인 실패/);assert.deepEqual(clicks,[2]);
 });
 test('repeated unverified page cannot be counted as collected even with request metadata proof',async()=>{
  const e=await runtime(),j=e.api.setJob(),rows=listing(2,'new').records,c={from:1,to:2,nextPage:2,products:rows,previousSignature:rows.map(x=>x.mallSeq+':'+x.nvMid).sort().join('|')};e.api.setState({collection:c});

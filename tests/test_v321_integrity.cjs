@@ -149,13 +149,13 @@ test('advertisement, review and group filters retain their behavior while consol
 });
 test('a scan budget reached before the bottom is partial, never a complete-page claim',async()=>{
   const e=await runtime(),j=e.api.setJob();let n=0;
-  e.api.override({scrollTop:async()=>{},scroll:async()=>{},inspect:async()=>({records:[item({nvMid:String(++n),chnlProdNo:String(n),observedPage:2})],scrollY:n*700,viewHeight:700,scrollHeight:1000000})});
+  e.api.override({inspectPager:async()=>({domCurrent:2}),scrollTop:async()=>{},scroll:async()=>{},inspect:async()=>({records:[item({nvMid:String(++n),chnlProdNo:String(n),observedPage:2})],scrollY:n*700,viewHeight:700,scrollHeight:1000000})});
   const result=await e.api.loadScrollPage(j,1,2,4);
   assert.equal(result.products.length,4);assert.equal(result.incomplete,true);assert.equal(result.scan.terminationReason,'step-limit');
 });
 test('bottom settling includes products arriving during the settling interval',async()=>{
   const e=await runtime(),j=e.api.setJob();let n=0;
-  e.api.override({scrollTop:async()=>{},scroll:async()=>{},inspect:async()=>({records:(++n>=4?[item(),item({chnlProdNo:'222',nvMid:'2222'})]:[item()]).map(x=>({...x,observedPage:2})),scrollY:300,viewHeight:700,scrollHeight:1000})});
+  e.api.override({inspectPager:async()=>({domCurrent:2}),scrollTop:async()=>{},scroll:async()=>{},inspect:async()=>({records:(++n>=4?[item(),item({chnlProdNo:'222',nvMid:'2222'})]:[item()]).map(x=>({...x,observedPage:2})),scrollY:300,viewHeight:700,scrollHeight:1000})});
   const result=await e.api.loadScrollPage(j,1,2,20);
   assert.equal(result.products.length,2);assert.equal(result.incomplete,false);assert.equal(result.scan.terminationReason,'bottom-stable');assert(n>=8);
 });

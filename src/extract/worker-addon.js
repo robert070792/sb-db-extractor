@@ -1,4 +1,4 @@
-/* 유승빈 DB추출기 v3.25: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
+/* 유승빈 DB추출기 v3.26: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
 (() => {
   'use strict';
   const KEY='sb_leads_v20_state'; // chrome.storage.local: 컴퓨터 + Chrome 프로필별, sync 사용 안 함
@@ -913,6 +913,14 @@
     }
     throw Error(`${keyword} 검색 결과 전환을 확인하지 못했습니다 (${last}). 검색 입력창과 돋보기 버튼을 확인하세요.`);
   }
+  function pageRequestFailure(data,page){
+    let keyword='';try{keyword=new URL(data?.url||'').searchParams.get('query')||'';}catch{}
+    const latest=(data?.lifecycle?.requests||[]).filter(x=>x.page===page&&(!keyword||x.query===keyword)&&/^\/(?:api\/)?search\/all(?:\.json)?$/.test(x.path||'')).at(-1);
+    if(!latest||!['http-error','error','aborted','timeout'].includes(latest.state))return null;
+    const detail=latest.status?`HTTP ${latest.status}`:({error:'통신 오류',aborted:'요청 취소',timeout:'응답 시간 초과'}[latest.state]||'요청 실패');
+    const error=Error(`${page}페이지 검색 요청 실패: ${detail}. 상품 갱신 미확인 · 추가 클릭과 수집 스크롤 중지`);
+    error.code='PAGE_REQUEST_FAILED';error.requestFailure={page,status:latest.status||0,state:latest.state,path:latest.path};return error;
+  }
   async function waitForPricePageChange(j,tabId,expectedPage,beforeSignature,beforePage,limitMs=15000){
     j.lastPageTransition=null;
     const started=Date.now();let deadline=Date.now()+limitMs,lastState='',lastFingerprint='',stable=0;
@@ -923,6 +931,12 @@
       if(data?.challenge){
         if(!j.paused){j.paused=true;state.paused=true;await patch(j,{paused:true,phase:'네이버 보안 인증 대기',stage:'현재 탭에서 직접 인증 후 이어하기를 누르세요.'});await log(j,'페이지 이동 중 보안 인증 감지 · 일시정지');}
         await waitIfPaused(j);deadline=Date.now()+limitMs;continue;
+      }
+      const failure=pageRequestFailure(data,expectedPage??pager?.domCurrent);
+      if(failure){
+        j.lastPageTransition={expectedPage,beforePage,actualPage:pager?.domCurrent??null,domCurrent:pager?.domCurrent,urlPage:pager?.urlPage,
+          lifecycle:data?.lifecycle||null,before:typeof beforeSignature==='object'?beforeSignature:{signature:beforeSignature,requests:[]},after:pageEvidence(data),requestFailure:failure.requestFailure,result:'request-error'};
+        state.pageTransitions.push(j.lastPageTransition);state.pageTransitions=state.pageTransitions.slice(-100);await save();throw failure;
       }
       if(!data?.records?.length){
         j.lastPageTransition={expectedPage,beforePage,actualPage:pager?.domCurrent??null,lifecycle:data?.lifecycle||null,
@@ -974,43 +988,12 @@
     if(j.lastPageTransition){state.pageTransitions.push({...j.lastPageTransition,result:'unverified'});state.pageTransitions=state.pageTransitions.slice(-100);await save();}
     throw Error(`페이지 이동 확인 실패 (${lastState||'페이지 응답 없음'}). 실제 페이지 버튼 또는 상품 로딩을 확인하세요.`);
   }
-  // URL 주소를 조작하지 않고 네이버의 실제 숫자 버튼을 한 번 더 이용하는 복구.
-  // 2페이지 표시만 바뀌고 1페이지 상품이 남는 SPA 불일치가 발생한 경우에만 호출합니다.
   async function checkpointPriceNavigation(j){
     const c=state.collection,attempt=j.navigationAttempt;
     if(!c||!attempt)return;
     // 서비스 워커가 클릭 직후 종료돼도 선택 숫자만으로 성공 처리하지 않도록 먼저 저장합니다.
     c.pageWait={...attempt,page:attempt.targetPage,label:`${attempt.keyword} ${attempt.targetPage}페이지 (수집 확인 대기)`,reason:'페이지 전환 확인 중',failedAt:null};
     await save();assertActive(j);
-  }
-  async function recoverPricePage(j,tabId,keyword,targetPage,fromPage,beforeSignature){
-    await log(j,`${keyword} · 페이지 전환 근거가 부족해 실제 숫자 버튼으로 1회 복구 시도`);
-    const current=await inspectPager(tabId);
-    if(current?.domCurrent!==targetPage||!Number.isInteger(fromPage)||fromPage===targetPage)return null;
-    await scrollFooter(tabId);await pause(300);
-    const back=await clickPage(tabId,fromPage,targetPage);
-    if(!back?.ok||back.clickedPage!==fromPage)throw Error(`페이지 복구 중 ${fromPage}페이지 버튼을 찾지 못했습니다. 기존 수집 내역은 보존됩니다.`);
-    // 복귀 페이지의 상품 로딩과 메타가 안정된 뒤 새로운 비교 기준을 잡습니다.
-    let baseline=null,last='',stableSince=0;
-    const deadline=Date.now()+15000;
-    while(Date.now()<deadline){
-      await waitIfPaused(j);await pause(350);assertActive(j);
-      const [data,pager]=await Promise.all([inspect(tabId),inspectPager(tabId)]);
-      const rows=data?.records||[];
-      const tagged=rows.map(x=>x.observedPage).filter(Number.isInteger);
-      const ready=pager?.domCurrent===fromPage&&!data?.loading&&!data?.challenge&&rows.length>0&&tagged.length>=Math.min(3,rows.length)&&tagged.every(n=>n===fromPage);
-      const evidence=pageEvidence(data||{}),fingerprint=ready?[evidence.signature,evidence.requests.join(',')].join('|'):'';
-      if(!ready||fingerprint!==last){last=fingerprint;stableSince=Date.now();baseline=null;continue;}
-      if(Date.now()-stableSince>=1800){baseline=evidence;break;}
-    }
-    if(!baseline)throw Error(`${keyword} ${targetPage}페이지 복구 실패: ${fromPage}페이지 상품 로딩 완료를 확인하지 못했습니다.`);
-    j.pageProof=null;
-    j.navigationAttempt={keyword,targetPage,fromPage,beforeEvidence:baseline};
-    await checkpointPriceNavigation(j);
-    await scrollFooter(tabId);await pause(450);
-    const forward=await clickPage(tabId,targetPage,fromPage);
-    if(!forward?.ok||forward.clickedPage!==targetPage)throw Error(`${keyword} ${targetPage}페이지 복구 실패: 실제 페이지 번호 버튼을 누르지 못했습니다.`);
-    return await waitForPricePageChange(j,tabId,targetPage,baseline,fromPage,18000);
   }
   async function navigatePrice(j,tabId,keyword,targetPage){
     assertActive(j);await waitIfPaused(j);
@@ -1050,14 +1033,8 @@
       if(!clicked?.ok)throw Error(`${targetPage}페이지 버튼을 찾지 못했습니다. 현재 ${actual??'미확인'}페이지, 보이는 번호 ${(clicked?.available||[]).join(', ')||'없음'}`);
       await log(j,`${keyword} · ${clicked.clickedPage??(clicked.navigation==='prev'?'이전':'다음')}페이지 버튼 클릭`);
       j.navigationDirection=clicked.navigation;
-      let after;
-      try{after=await waitForPricePageChange(j,tabId,clicked.clickedPage,signature,actual,15000);}
-      catch(error){
-        // 번호만 전환된 경우 실제 숫자 버튼으로 한 번만 복구한다. URL 재작성은 하지 않는다.
-        const recovered=clicked.clickedPage===null?null:await recoverPricePage(j,tabId,keyword,clicked.clickedPage,actual,signature);
-        if(!recovered)throw Error(`${keyword} ${clicked.clickedPage||targetPage}페이지 실제 상품 변경 미확인: ${str(error.message||error)}`);
-        after=recovered;
-      }
+      // 실패 후 왕복 클릭·스크롤 없이 저장한 위치에서 대기합니다.
+      const after=await waitForPricePageChange(j,tabId,clicked.clickedPage,signature,actual,15000);
       pager=after.pager;let newly=after.actual;
       if(newly===null||newly===undefined)throw Error('이동 후 페이지 번호 확인 불가');
       if(actual!==null&&newly===actual)throw Error('페이지 버튼을 클릭했지만 페이지가 바뀌지 않았습니다.');
@@ -1083,15 +1060,26 @@
     }
     return added;
   }
+  function requireScrollPage(data,pager,page){
+    const failure=pageRequestFailure(data,page);if(failure)throw failure;
+    if(data?.challenge||data?.loading||pager?.domCurrent!==page)throw Error(`${page}페이지 수집 전 확인 실패: 현재 번호 ${pager?.domCurrent??'미확인'} · 상품 로딩/선택 상태 확인 필요. 스크롤을 중지합니다.`);
+    if((data?.records||[]).some(x=>Number.isInteger(x.observedPage)&&x.observedPage!==page))throw Error(`${page}페이지 수집 전 확인 실패: 다른 페이지 상품이 남아 있어 스크롤을 중지합니다.`);
+    if(!data?.records?.length)throw Error(`${page}페이지 상품 로딩을 확인하지 못해 스크롤을 시작하지 않습니다.`);
+  }
   async function loadScrollPage(j,tabId,page,maxSteps=80){
+    await waitIfPaused(j);assertActive(j);
+    const [ready,pager]=await Promise.all([inspect(tabId),inspectPager(tabId)]);
+    requireScrollPage(ready,pager,page);
+    await log(j,`${page}페이지 선택·상품 확인 완료 · 맨 위부터 수집 스크롤 시작`);
     await scrollTop(tabId);await pause(500);
     const products=new Map(),rawKeys=new Set(),unidentifiedKeys=new Set(),legacyWideKeys=new Set(),legacySellerWideKeys=new Set(),legacySafeKeys=new Set(),legacyAmbiguousKeys=new Set(),strictKeys=new Set();
     const legacyRejectedReasons={},legacyRejectedSamples=[];const representativeKeys=new Set(),representativeNoProviderKeys=new Set(),representativeNoProductKeys=new Set(),representativeDetails=new Map(),reconciledKeys=new Set();let flat=0,atBottom=0,lastY=-1,totalAds=0,totalLinkEvents=0,terminationReason='step-limit';
     let wrongPage=0,correctPage=0,scrollSamples=0,totalNestedExcluded=0,totalAmbiguousCards=0;
     for(let n=0;n<maxSteps;n++){
       await waitIfPaused(j);
-      const data=await inspect(tabId);
+      const [data,currentPager]=await Promise.all([inspect(tabId),inspectPager(tabId)]);
       if(data?.challenge){await waitForProducts(j,tabId,page);continue;}
+      requireScrollPage(data,currentPager,page);
       totalAds=Math.max(totalAds,data?.ads||0);
       scrollSamples++;
       totalLinkEvents+=Number(data?.rawEvents||0);
@@ -1218,7 +1206,7 @@
     const reason=str(error.message||error).slice(0,1000),label=`${keyword} ${page}페이지 (수집 확인 대기)`;
     const attempt=j.navigationAttempt?.keyword===keyword&&j.navigationAttempt.targetPage===page?j.navigationAttempt:null;
     c.nextPage=page;
-    c.pageWait={...(c.pageWait||{}),...(attempt||{}),keyword,page,reason,label,failedAt:Date.now()};
+    c.pageWait={...(c.pageWait||{}),...(attempt||{}),keyword,page,reason,label,requestFailure:error.requestFailure||null,failedAt:Date.now()};
     state.incompletePages=state.incompletePages||[];
     if(!state.incompletePages.includes(label))state.incompletePages.push(label);
     await save();
@@ -1247,14 +1235,7 @@
       const repeatedPage=Boolean(previousSignature&&sig===previousSignature);
       const repeatedWithProof=j.pageProof?.page===p&&result.products.every(x=>x.observedPage===p)&&j.pageProof.lifecycleProof===true;
       if(previousSignature&&sig===previousSignature&&!repeatedWithProof){
-        await log(j,`${keyword} ${p}페이지에 이전 페이지 상품이 재등장했습니다. 완료 처리하지 않고 자동으로 재확인합니다.`);
-        await scrollTop(j.tabId);await pause(1400);
-        const retry=await loadScrollPage(j,j.tabId,p);
-        const retrySig=retry.products.map(x=>x.mallSeq+':'+x.nvMid).sort().join('|');
-        if(retrySig===previousSignature){
-          await holdPricePage(j,c,keyword,p,Error(`${keyword} ${p}페이지 상품 목록이 이전 페이지와 같습니다. 실제 상품 갱신을 확인한 뒤 이어하기를 누르세요.`));
-        }
-        result.products=retry.products;result.ads=retry.ads;result.scan=retry.scan;
+        await holdPricePage(j,c,keyword,p,Error(`${keyword} ${p}페이지 상품 목록이 이전 페이지와 같습니다. 실제 상품 갱신을 확인한 뒤 이어하기를 누르세요.`));
       }
       previousSignature=result.products.map(x=>x.mallSeq+':'+x.nvMid).sort().join('|');
       // 화면에서 일반상품처럼 보이는 카드도 catalog_nv_mid를 통해 카탈로그를 조회합니다.
@@ -1611,7 +1592,8 @@
       if(!stopped&&e.code==='PAGE_WAIT'){
         j.waitingForPage=true;
         const page=state.collection?.nextPage;
-        await patch(j,{phase:'페이지 확인 대기',error:'',stage:`${page}페이지 상품 갱신을 기다립니다. 계속 멈추면 실제 다른 페이지 → ${page}페이지 버튼을 직접 누른 뒤 이어하기를 누르세요.`,currentStore:''});
+        const failed=state.collection?.pageWait?.requestFailure;
+        await patch(j,{phase:'페이지 확인 대기',error:'',stage:failed?`${state.collection.pageWait.reason}. 네이버 화면을 직접 확인하고 정상 상품이 표시된 뒤 이어하기를 누르세요.`:`${page}페이지 상품 갱신 미확인 · 스크롤 중지. 현재 네이버 화면의 상품 로딩을 확인한 뒤 이어하기를 누르세요.`,currentStore:''});
         return;
       }
       await patch(j,{phase:stopped?'중단됨':'오류',error:stopped?'':(e.message||str(e)),stage:stopped?'사용자가 중단했습니다.':(e.message||str(e))});

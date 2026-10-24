@@ -1,0 +1,17 @@
+{
+  "version": "3.26",
+  "source": "user v3.25 diagnostic, offline HTTP 418 transition replay",
+  "observedProductEvidence": 54,
+  "preservedProductEvidence": 46,
+  "pageClicks": [
+    2
+  ],
+  "footerScrollsBeforeClick": 1,
+  "topScrollsAfterClick": 0,
+  "collectionScrolls": 0,
+  "businessRequests": 0,
+  "status": "페이지 확인 대기",
+  "httpStatusShown": 418,
+  "nextPage": 2,
+  "realServerVerified": false
+}

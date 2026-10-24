@@ -1,17 +1,16 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const {runtime,item}=require('./helpers/runtime.cjs');
-test('recovery clicks the previous and target number, with no tab URL update',async()=>{
-  const e=await runtime(),j=e.api.setJob(),clicks=[];let page=2;
-  e.api.override({scrollFooter:async()=>{},scrollTop:async()=>{},inspectPager:async()=>({domCurrent:page}),inspect:async()=>({records:[item({observedPage:page,searchRequestId:'returned-baseline'})]}),
-    clickPage:async(_,next)=>{clicks.push(next);page=next;return {ok:true,clickedPage:next};},
-    waitForPricePageChange:async(_,__,___,baseline)=>{assert.deepEqual(Array.from(baseline.requests),['returned-baseline']);return {actual:2,proof:'changed products'};}});
-  const result=await e.api.recoverPricePage(j,1,'test',2,1,'original');
-  assert.equal(result.actual,2);assert.deepEqual(clicks,[1,2]);
+test('unverified target page waits without automatic previous/target recovery clicks',async()=>{
+  const e=await runtime(),j=e.api.setJob(),clicks=[];let page=1,footers=0;
+  e.api.override({scrollFooter:async()=>{footers++;},scrollTop:async()=>{throw Error('unexpected scroll');},inspectPager:async()=>({domCurrent:page}),inspect:async()=>({records:[item({observedPage:page,searchRequestId:'same'})]}),
+    clickPage:async(_,next)=>{clicks.push(next);page=next;return {ok:true,clickedPage:next};}});
+  await assert.rejects(()=>e.api.navigatePrice(j,1,'test',2),/페이지 이동 확인 실패/);
+  assert.deepEqual(clicks,[2]);assert.equal(footers,1);
 });
-test('a failed actual button recovery cannot report success',async()=>{
-  const e=await runtime(),j=e.api.setJob();
-  e.api.override({scrollFooter:async()=>{},scrollTop:async()=>{},inspectPager:async()=>({domCurrent:2}),clickPage:async()=>({ok:false})});
-  await assert.rejects(()=>e.api.recoverPricePage(j,1,'test',2,1,'original'),/버튼을 찾지/);
+test('missing target button fails without recovery or scrolling on a different page',async()=>{
+  const e=await runtime(),j=e.api.setJob();let clicks=0;
+  e.api.override({scrollFooter:async()=>{},inspect:async()=>({records:[item()]}),inspectPager:async()=>({domCurrent:1}),clickPage:async()=>{clicks++;return {ok:false};}});
+  await assert.rejects(()=>e.api.navigatePrice(j,1,'test',2),/버튼을 찾지/);assert.equal(clicks,1);
 });
 test('page failure preserves preceding products and waits before business lookup',async()=>{
   const e=await runtime(),j=e.api.setJob();
