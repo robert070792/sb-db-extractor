@@ -26,6 +26,7 @@ test('catalog representatives reach seller expansion and keep verified catalog n
  const e=await runtime(),d=page();try{
  anchor(d.window,1);anchor(d.window,2);const scan=call(d.window,e.api.inspectProducts),calls=[];
  e.api.override({inspectCatalogOffers:async(_,id)=>{calls.push(id);return {ok:true,totalKnown:true,totalCount:1,products:[{mallSeq:'100',nvMid:'9000',chnlNo:'200',chnlProdNo:'111',productUrl:'https://smartstore.naver.com/expected/products/111',isSmartStoreProduct:true,advertiserType:'SHOPN',matchNvMid:id}]};}});
+  e.api.state.settings.catalogLookup=true; // Explicit ON for the existing expansion regression.
  const result=await e.api.expandCatalogsOnPage(e.api.setJob(),{products:[]},'test',2,scan.records);assert.deepEqual(calls,['5001','5002']);assert.equal(result.counts.catalogsSucceeded,2);assert(result.expanded.every(x=>x.catalogVerified&&x.fromCatalog&&!x.isAd));
  const c={products:[]};const audit=e.api.reconcilePage(c,'test',2,scan.records,result.expanded,result.counts);assert.equal(audit.searchProducts,2);assert.equal(audit.rawCatalogRepresentatives,2);assert.equal(c.products.length,1);assert.equal(e.requests.length,0);
  }finally{d.window.close();}

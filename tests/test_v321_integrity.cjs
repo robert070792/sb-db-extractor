@@ -171,6 +171,7 @@ test('coverage gaps stay numeric, get per-product reasons, and force partial com
 for(const count of [20,25])test(`catalog total 25 vs ${count} unique offers: correct completion result`,async()=>{
   const e=await runtime(),j=e.api.setJob(),collection={products:[]};
   e.api.override({inspectCatalogOffers:async(_,id,page)=>({ok:true,totalKnown:true,totalCount:25,products:Array.from({length:page<3?10:count-20},(_,i)=>({mallSeq:String(page*100+i),nvMid:String(page*1000+i)}))})});
+  e.api.state.settings.catalogLookup=true; // Explicit ON for the existing expansion regression.
   const result=await e.api.expandCatalogsOnPage(j,collection,'test',1,[{catalogNvMid:'5000',catalogUrlId:'5000',nvMid:'5000',sellerCount:25}]);
   assert.equal(result.counts.apiOffers,count);assert.equal(result.counts.catalogsSucceeded,count===25?1:0);
   assert.equal(collection.catalogProcessed['5000'],count===25?'ok':'partial');
@@ -178,6 +179,7 @@ for(const count of [20,25])test(`catalog total 25 vs ${count} unique offers: cor
 test('repeat catalog offers cannot count as additional collected products',async()=>{
   const e=await runtime(),j=e.api.setJob(),collection={products:[]};
   e.api.override({inspectCatalogOffers:async()=>({ok:true,totalKnown:true,totalCount:20,products:Array.from({length:10},(_,i)=>({mallSeq:String(i+1),nvMid:String(i+10)}))})});
+  e.api.state.settings.catalogLookup=true; // Explicit ON for the existing expansion regression.
   const result=await e.api.expandCatalogsOnPage(j,collection,'test',1,[{catalogUrlId:'5000',nvMid:'5000'}]);
   assert.equal(result.counts.apiOffers,10);assert.equal(result.counts.catalogsSucceeded,0);
 });

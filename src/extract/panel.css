@@ -78,3 +78,5 @@
 #sb-leads-panel.sb-collapsed{width:max-content!important;height:44px!important;min-width:0!important;min-height:0!important;max-width:calc(100vw - 8px)!important;max-height:44px!important;resize:none!important;border:0!important;box-shadow:none!important;background:transparent!important;overflow:visible!important;border-radius:13px!important}
 #sb-leads-panel.sb-collapsed .sb-header,#sb-leads-panel.sb-collapsed .sb-body,#sb-leads-panel.sb-collapsed .sb-effect,#sb-leads-panel.sb-collapsed .sb-resize-hint{display:none!important}
 #sb-leads-panel.sb-collapsed #sb-mini{display:inline-flex!important}
+#sb-leads-panel #sb-catalog-toggle{width:100%;margin-top:5px}
+#sb-leads-panel #sb-catalog-result{margin-bottom:7px}

@@ -1,4 +1,4 @@
-/* 유승빈 DB추출기 v3.26: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
+/* 유승빈 DB추출기 v3.27: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
 (() => {
   'use strict';
   const KEY='sb_leads_v20_state'; // chrome.storage.local: 컴퓨터 + Chrome 프로필별, sync 사용 안 함
@@ -13,8 +13,9 @@
   const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const clock=()=>new Date().toLocaleTimeString('ko-KR');
   const str=v=>String(v==null?'':v);
+  const blankCatalogRequests=()=>({attempted:0,fetchInvoked:0,unconfirmed:0,legacyUncounted:false});
   const blankStats=()=>({filtered:0,duplicate:0,unknownReviews:0,unknownGroup:0,adsExcluded:0,sameSeller:0,invalidSeller:0,selected:0,checked:0,new:0,absent:0,rejected:0,paid:0,paymentScheduled:0,sameBranch:0,otherBranch:0,unknown:0,excluded:0,no010:0,businessDuplicates:0,lookupPrevented:0,bizCached:0,bizLatest:0,bizLegacy:0,bizErrors:0,bizUrlMissing:0,bizAuthErrors:0,bizUrlMissingAds:0,bizUrlMissingCatalogs:0,bizStoreRecovered:0,bizStoreConflicts:0,bizNoDetails:0});
-  const blank=()=>({runId:Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),pageTransitions:[],settings:{},basic:[],seen:[],lookupAttempted:[],businessIndex:{},statistics:blankStats(),pending:[],collection:null,running:false,paused:false,phase:'대기 중',stage:'',startedAt:0,finishedAt:0,processed:0,total:0,scanned:0,page:0,pageTotal:0,matched:[],review:[],logs:[],error:'',discovered:0,ads:0,keyword:'',source:'',mode:'',searchUrl:'',skipped:0,pageStats:[],auditPages:[],auditRows:[],auditTruncated:0,catalogDiagnostics:[],phoneDuplicates:0,currentStore:'',unidentifiedWarnings:0,unidentifiedUniqueCandidates:0,unidentifiedObservationCount:0,catalogWarnings:0,catalogExpanded:0,catalogBlockedReason:"",incompletePages:[],plusBatchSize:PLUS_BATCH});
+  const blank=()=>({runId:Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),pageTransitions:[],settings:{catalogLookup:false},catalogRequests:blankCatalogRequests(),basic:[],seen:[],lookupAttempted:[],businessIndex:{},statistics:blankStats(),pending:[],collection:null,running:false,paused:false,phase:'대기 중',stage:'',startedAt:0,finishedAt:0,processed:0,total:0,scanned:0,page:0,pageTotal:0,matched:[],review:[],logs:[],error:'',discovered:0,ads:0,keyword:'',source:'',mode:'',searchUrl:'',skipped:0,pageStats:[],auditPages:[],auditRows:[],auditTruncated:0,catalogDiagnostics:[],phoneDuplicates:0,currentStore:'',unidentifiedWarnings:0,unidentifiedUniqueCandidates:0,unidentifiedObservationCount:0,catalogWarnings:0,catalogExpanded:0,catalogBlockedReason:"",incompletePages:[],plusBatchSize:PLUS_BATCH});
   let state=null,job=null,lookupLedger={},rememberedStores={},storeSaveQueue=Promise.resolve();
   function sourceUrl(raw){
     try{const u=new URL(raw);if(u.origin!==SHOP_ORIGIN||!u.searchParams.get('query'))return null;
@@ -27,6 +28,10 @@
     if(!state){const data=await chrome.storage.local.get([KEY,LEDGER_KEY,STORE_MAP_KEY]);if(state)return state;const saved=data[KEY]||{};
       rememberedStores=data[STORE_MAP_KEY]||{};
       state={...blank(),...saved,statistics:{...blankStats(),...(saved.statistics||{})}};
+      // 이전 버전의 이어하기는 당시 조회 켜짐을 유지하고, 새 작업은 명시적으로 선택합니다.
+      const legacyCatalog=typeof saved.settings?.catalogLookup!=='boolean'&&!!(saved.startedAt||saved.collection||saved.pending?.length);
+      state.settings={...state.settings,catalogLookup:legacyCatalog?true:state.settings.catalogLookup===true};
+      state.catalogRequests=saved.catalogRequests||{...blankCatalogRequests(),legacyUncounted:legacyCatalog};
       state.seen=[...new Set((state.seen||[]).map(str))];
       state.lookupAttempted=[...new Set((state.lookupAttempted||[]).map(str))];
       lookupLedger=data[LEDGER_KEY]&&typeof data[LEDGER_KEY]==='object'?data[LEDGER_KEY]:{};
@@ -603,7 +608,7 @@
   // 요청은 같은 origin에서 수행하므로 카탈로그 탭을 새로 열지 않습니다.
   async function fetchCatalogOfferPage(catalogId,page,keyword,catalogType,cCatalogId){
     const numeric=id=>/^\d{1,20}$/.test(String(id||''));
-    if(!numeric(catalogId)||!Number.isInteger(page)||page<1||page>50)return {ok:false,reason:'카탈로그 조회 인자 오류'};
+    if(!numeric(catalogId)||!Number.isInteger(page)||page<1||page>50)return {ok:false,fetchInvoked:false,reason:'카탈로그 조회 인자 오류'};
     const url=new URL('/catalog/api/'+catalogId+'/products',location.origin);
     url.searchParams.set('nvMid',catalogId);
     url.searchParams.set('page',String(page));
@@ -616,7 +621,10 @@
     if(catalogType)url.searchParams.set('catalogType',catalogType);
     url.searchParams.set('query',keyword||'');
     const ac=new AbortController(),timer=setTimeout(()=>ac.abort(),10500);
+    let fetchInvoked=false;
+    const result=await (async()=>{
     try{
+      fetchInvoked=true;
       const response=await fetch(url.toString(),{method:'GET',credentials:'same-origin',signal:ac.signal});
       if(!response.ok)return {ok:false,status:response.status,reason:'카탈로그 HTTP '+response.status};
       const type=(response.headers.get('content-type')||'').toLowerCase();
@@ -644,13 +652,22 @@
       return {ok:true,totalCount:totalKnown?totalCount:null,totalKnown,received:filtered.length,products:filtered};
     }catch(e){return {ok:false,reason:String(e?.message||e).slice(0,180)};}
     finally{clearTimeout(timer);}
+    })();
+    return {...result,fetchInvoked};
   }
   async function inspectCatalogOffers(j,catalogId,page,keyword,catalogType,cCatalogId){
     assertActive(j);await waitIfPaused(j);
+    if(state.settings.catalogLookup!==true)return {ok:false,fetchInvoked:false,disabled:true,reason:'사용자 설정: 원부 추가 조회 꺼짐'};
+    const metrics=state.catalogRequests||(state.catalogRequests=blankCatalogRequests());
+    metrics.attempted++;metrics.unconfirmed++;await save();assertActive(j);
+    let result;
     try {
       const r=await chrome.scripting.executeScript({target:{tabId:j.tabId},world:'MAIN',func:fetchCatalogOfferPage,args:[catalogId,page,keyword,catalogType,cCatalogId]});
-      return r?.[0]?.result||{ok:false,reason:'브라우저에서 카탈로그 응답을 받지 못했습니다.'};
-    } catch(e) {return {ok:false,reason:String(e?.message||e).slice(0,180)};}
+      result=r?.[0]?.result||{ok:false,reason:'브라우저에서 카탈로그 응답을 받지 못했습니다.'};
+    } catch(e) {result={ok:false,reason:String(e?.message||e).slice(0,180)};}
+    assertActive(j);
+    if(typeof result.fetchInvoked==='boolean'){metrics.unconfirmed--;if(result.fetchInvoked)metrics.fetchInvoked++;}
+    await save();return result;
   }
   function toNaverCatalogOffer(x,catalogId,related,keyword,page,knownStoreItems=[]){
     const id=String(x.mallSeq||''),mid=String(x.nvMid||''),chan=String(x.chnlNo||'');
@@ -710,6 +727,14 @@
     const counts={apiOffers:0,apiNaver:0,apiExternal:0,catalogsAttempted:0,catalogsSucceeded:0,catalogsFailed:0,catalogsSkippedSelf:skippedSelfReferenced};
     if(skippedSelfReferenced)await log(j,`${keyword} ${page}페이지 · 카탈로그 별도 조회 증거 없는 일반상품 ${skippedSelfReferenced}개 API 호출 생략 (상품번호=연결번호, 검색상품은 보존)`);
     const entries=[...byId.entries()];
+    counts.catalogLookupEnabled=state.settings.catalogLookup===true;
+    counts.catalogsDisabled=0;
+    if(!counts.catalogLookupEnabled){
+      counts.catalogsDisabled=entries.length;
+      for(const [key] of entries)recordCatalog(key,'','설정으로 미조회','원부 추가 조회 꺼짐');
+      await log(j,`${keyword} ${page}페이지 · 원부 추가 조회 꺼짐 · ${entries.length}개 연결 후보 미조회 · 화면 상품정보만 수집`);
+      await save();return {expanded,successful,failures,counts};
+    }
     const countSkipped=async()=>{
       let skipped=0;
       for(const [key] of entries){
@@ -1169,11 +1194,13 @@
       catalogNewOffers:offers.length,offerExistingProduct:0,offerAdded:0,
       catalogsAttempted:catalogMetrics?.catalogsAttempted||0,catalogsFailed:catalogMetrics?.catalogsFailed||0,catalogsSkippedSelf:catalogMetrics?.catalogsSkippedSelf||0,
       catalogsSucceeded:catalogMetrics?.catalogsSucceeded||0};
+    metrics.catalogLookupEnabled=catalogMetrics?.catalogLookupEnabled??state.settings.catalogLookup===true;
+    metrics.catalogsDisabled=catalogMetrics?.catalogsDisabled||0;
     const known=new Map(c.products.map(x=>[x.mallSeq+':'+(x.chnlProdNo||x.nvMid),x]));
     const mergeKnown=(key,item)=>{const one=new Map([[key,known.get(key)]]);appendProducts([item],one,page);Object.assign(known.get(key),one.get(key));};
     for(const item of observed){
       let status='';
-      if(item.isCatalogRepresentative){status='원부상품 대표카드 (판매처 API 조회 대상)';metrics.rawCatalogRepresentatives++;}
+      if(item.isCatalogRepresentative){status=metrics.catalogLookupEnabled?'원부상품 대표카드 (판매처 API 조회 대상)':'원부상품 대표카드 · 설정으로 판매처 미조회';metrics.rawCatalogRepresentatives++;}
       else if(!item.isNaverStore){status=item.advertiserType==='SHOPN'?'네이버스토어 식별정보 불충분':'외부쇼핑몰/네이버스토어 미확인';
         if(item.advertiserType==='SHOPN')metrics.rawUnknown++;else metrics.rawExternal++;
       }else{
@@ -1181,7 +1208,7 @@
         // SHOPN + 채널번호 + 개별상품번호까지 확인된 단일 판매자 상품은
         // 카탈로그 판매처 수가 2 이상이어도 먼저 보존합니다. API는 추가 판매처만 더합니다.
         // 대표카드 자체(개별 판매자 상품 번호 없음)는 API로 분리합니다.
-        if(item.sellerCount>1&&!item.chnlProdNo){status='원부상품 대표카드 제외 (판매처 API로 대체)';metrics.rawCatalogRepresentatives++;}
+        if(item.sellerCount>1&&!item.chnlProdNo){status=metrics.catalogLookupEnabled?'원부상품 대표카드 제외 (판매처 API로 대체)':'원부상품 대표카드 · 설정으로 판매처 미조회';metrics.rawCatalogRepresentatives++;}
         else{
           const key=item.mallSeq+':'+(item.chnlProdNo||item.nvMid);
           if(known.has(key)){mergeKnown(key,item);status='기존 상품 중복';metrics.rawExistingProduct++;}
@@ -1624,7 +1651,7 @@
         const minReviews=Math.max(0,Number(raw.minReviews)||0);
         const maxReviews=raw.maxReviews===''||raw.maxReviews==null?null:Number(raw.maxReviews);
         if(maxReviews!==null&&(!Number.isFinite(maxReviews)||maxReviews<minReviews))throw Error('리뷰 최대값은 최소값 이상이어야 합니다.');
-        const settings={from,to,mode,keywords,minReviews,maxReviews,lookupMode:'company',reviewsEnabled:!!raw.reviewsEnabled,grouped:raw.grouped==='exclude'?'exclude':'include',ads:['all','exclude','only'].includes(raw.ads)?raw.ads:'all',owner:str(raw.owner||'').trim().slice(0,40)};
+        const settings={from,to,mode,keywords,minReviews,maxReviews,catalogLookup:raw.catalogLookup===true,lookupMode:'company',reviewsEnabled:!!raw.reviewsEnabled,grouped:raw.grouped==='exclude'?'exclude':'include',ads:['all','exclude','only'].includes(raw.ads)?raw.ads:'all',owner:str(raw.owner||'').trim().slice(0,40)};
         const j={cancelled:false,paused:false,finishCollection:false,abort:null,tabId:sender.tab.id};job=j;
         reply({ok:true,accepted:true});
         void(async()=>{
@@ -1633,9 +1660,9 @@
             if(state.pending?.length||state.collection)throw Error('이전 작업이 남아 있습니다. 이어하기 또는 작업 초기화를 사용하세요.');
             await requireCompanyAccess();
             Object.assign(state,{runId:Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),pageTransitions:[],seen:[],matched:[],review:[],businessIndex:{},statistics:blankStats(),skipped:0,basic:[],running:true,paused:false,startedAt:Date.now(),finishedAt:0,logs:[],phase:'요청 접수',stage:'현재 네이버 탭에서 수집 시작',keyword,source:src,mode,searchUrl,settings,pageTotal:mode==='auto'?(src==='plus'?0:to-from+1):1,error:'',pageStats:[],auditPages:[],auditRows:[],auditTruncated:0,catalogDiagnostics:[],phoneDuplicates:0,currentStore:'',unidentifiedWarnings:0,unidentifiedUniqueCandidates:0,unidentifiedObservationCount:0,catalogWarnings:0,catalogExpanded:0,catalogBlockedReason:"",catalogDiagnostics:[],incompletePages:[],total:0,processed:0});
-            state.scanned=0;state.discovered=0;state.ads=0;state.page=0;
+            state.scanned=0;state.discovered=0;state.ads=0;state.page=0;state.catalogRequests=blankCatalogRequests();
             state.collection={source:src,mode,searchUrl,from,to,keywords,keywordIndex:0,nextPage:from,previousSignature:'',products:[],catalogProcessed:{},tabId:sender.tab.id};
-            await save();await log(j,`${src==='plus'?'플러스스토어':'가격비교'} '${keywords.join(', ')}' ${mode==='auto'?(src==='plus'?`연속 스크롤 (${PLUS_BATCH}개마다 저장, 수집 종료 버튼까지)`:`${from}~${to}페이지 번호 클릭 추출`):'현재 화면 추출'} 시작 · 새 탭 생성 없음`);
+            await save();await log(j,`원부 추가 조회 ${settings.catalogLookup?'켜짐':'꺼짐'} · 이 작업의 고정 설정`);await log(j,`${src==='plus'?'플러스스토어':'가격비교'} '${keywords.join(', ')}' ${mode==='auto'?(src==='plus'?`연속 스크롤 (${PLUS_BATCH}개마다 저장, 수집 종료 버튼까지)`:`${from}~${to}페이지 번호 클릭 추출`):'현재 화면 추출'} 시작 · 새 탭 생성 없음`);
             await runJob(j);
           }catch(e){if(job===j){state.running=false;state.phase='시작 실패';state.error=str(e.message||e);await save();job=null;}}
         })();

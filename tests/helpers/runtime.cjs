@@ -41,7 +41,7 @@ async function runtime(options={}){
     inspectOpenedStore,rememberOpenedStore,storeHints,inspectProducts,inspectPricePagination,clickPricePagination,performPriceKeywordSearch,
     prepareBusinessLookup,executePreparedBusinessLookup,normalizeCachedData,
     enrichStoreUrls:C.enrichStoreUrls,processPending,collect,collectPrice,collectPlus,loadScrollPage,
-    expandCatalogsOnPage,toNaverCatalogOffer,fetchCatalogOfferPage,recordScanAudit,reconcilePage,
+    expandCatalogsOnPage,inspectCatalogOffers,toNaverCatalogOffer,fetchCatalogOfferPage,recordScanAudit,reconcilePage,
     pageEvidence,navigatePrice,ensureKeyword,waitForPricePageChange,runJob,flagSharedPhones,
     getState,lookupAlreadyRequested,recordLookupRequest,finishLookupRequest,
     get state(){return state;},get ledger(){return lookupLedger;},get job(){return job;},

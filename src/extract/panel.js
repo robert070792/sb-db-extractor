@@ -1,9 +1,9 @@
-/* 유승빈 DB추출기 v3.26 - 기존 탭 재사용 / 사업자중복 / 로컬 이력 검색 결과 상단 UI */
+/* 유승빈 DB추출기 v3.27 - 기존 탭 재사용 / 사업자중복 / 로컬 이력 검색 결과 상단 UI */
 (()=>{
   if(document.getElementById('sb-leads-panel'))return;
   const root=document.createElement('section');root.id='sb-leads-panel';
   root.innerHTML=`
-    <div class="sb-header" id="sb-drag-handle" title="여기를 잡고 원하는 위치로 이동"><span class="sb-mark">SB</span><strong>유승빈 DB추출기</strong><small>v3.26</small><button id="sb-toggle" aria-label="패널 접기" title="접기">−</button></div>
+    <div class="sb-header" id="sb-drag-handle" title="여기를 잡고 원하는 위치로 이동"><span class="sb-mark">SB</span><strong>유승빈 DB추출기</strong><small>v3.27</small><button id="sb-toggle" aria-label="패널 접기" title="접기">−</button></div>
     <button id="sb-mini" type="button" title="유승빈 DB추출기 펼치기"><span class="sb-mini-mark">SB</span><span class="sb-mini-led"></span><span class="sb-mini-title">유승빈 DB추출기</span><span class="sb-mini-action">펼치기</span></button>
     <div id="sb-effect" class="sb-effect" aria-live="polite" aria-hidden="true"><span id="sb-effect-icon">✨</span><strong id="sb-effect-title">시작!</strong><span id="sb-effect-sub">추출 준비 중</span><div class="sb-confetti"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
     <div id="sb-body" class="sb-body">
@@ -15,6 +15,9 @@
       <label>추출 키워드 (줄바꿈 또는 쉼표 구분, 최대 20개)<textarea id="sb-keywords" rows="3" placeholder="암막커튼&#10;쉬폰커튼"></textarea></label>
       <div class="sb-fields"><label>최소 리뷰수<input id="sb-minreviews" type="number" min="0" value="0"></label><label>최대 리뷰수 (빈칸=무제한)<input id="sb-maxreviews" type="number" min="0" placeholder="무제한"></label></div>
       <label class="sb-check"><input id="sb-reviewfilter" type="checkbox"> 리뷰수 필터 사용</label>
+      <button id="sb-catalog-toggle" type="button" class="sb-btn sb-secondary" aria-pressed="false">네이버 원부 추가 조회: 꺼짐</button>
+      <div id="sb-catalog-note" class="sb-help">꺼짐: 화면 상품정보만 수집. 켜짐: 원부의 연결 판매처를 네이버에 추가 요청합니다. 검색·페이지 이동과 회사 사업자조회는 유지됩니다.</div>
+      <div id="sb-catalog-result" class="sb-hint"></div>
       <div class="sb-fields"><label>묶음상품<select id="sb-grouped"><option value="include">포함</option><option value="exclude">제외 (확인 불가도 보류)</option></select></label><label>광고상품<select id="sb-ads"><option value="all">모두 포함</option><option value="exclude">광고 제외</option><option value="only">광고만</option></select></label></div>
       <div class="sb-buttons"><button id="sb-current" class="sb-btn sb-primary">현재 화면 추출</button><button id="sb-auto" class="sb-btn sb-primary">전체 자동 추출</button></div>
       <div class="sb-buttons"><button id="sb-pause" class="sb-btn sb-secondary" disabled>Ⅱ 일시정지</button><button id="sb-resume" class="sb-btn sb-secondary" disabled>▶ 이어하기</button></div>
@@ -38,6 +41,14 @@
     </div><span class="sb-resize-hint" title="우측 아래 모서리를 끌어 크기 조절"></span>`;
   document.documentElement.appendChild(root);
   const $=id=>root.querySelector('#'+id);
+  let catalogDraft=false;
+  function renderCatalogChoice(){
+    const locked=waiting||!!snapshot?.running||!!snapshot?.collection||!!snapshot?.pending?.length;
+    const btn=$('sb-catalog-toggle');btn.disabled=locked;btn.setAttribute('aria-pressed',String(catalogDraft));
+    btn.textContent=`네이버 원부 추가 조회: ${catalogDraft?'켜짐':'꺼짐'}`;
+    btn.classList.toggle('sb-primary',catalogDraft);btn.classList.toggle('sb-secondary',!catalogDraft);
+    $('sb-catalog-note').textContent='꺼짐: 화면 상품정보만 수집. 켜짐: 원부의 연결 판매처를 네이버에 추가 요청합니다. 검색·페이지 이동과 회사 사업자조회는 유지됩니다.'+(locked?' 설정을 바꾸려면 결과 저장 후 작업 초기화하세요.':'');
+  }
   const uiLayoutKey='sb_panel_layout_v26',minKey='sb_panel_minimized_v28';
   let restored=false,moving=false,resizeTimer=null,effectTimer=null,previousCompletedAt=0,firstState=true,wasMiniDrag=false;
   const viewportClamp=(x,y,w,h)=>({x:Math.max(4,Math.min(x,Math.max(4,window.innerWidth-w-4))),y:Math.max(4,Math.min(y,Math.max(4,window.innerHeight-58)))});
@@ -131,8 +142,13 @@
       if(s.settings?.minReviews!=null)set('sb-minreviews',s.settings.minReviews);
       if(s.settings?.maxReviews!=null)set('sb-maxreviews',s.settings.maxReviews);
       $('sb-reviewfilter').checked=!!s.settings?.reviewsEnabled;
+      catalogDraft=s.settings?.catalogLookup===true;
       hydrated=true;
     }
+    if(busy||s.collection||s.pending?.length)catalogDraft=s.settings?.catalogLookup===true;
+    renderCatalogChoice();
+    const cr=s.catalogRequests||{};
+    $('sb-catalog-result').textContent=s.startedAt?`이 작업: ${s.settings?.catalogLookup?'켜짐':'꺼짐'} · 원부 요청 ${cr.fetchInvoked||0}회 · 전송 여부 미확인 ${cr.unconfirmed||0}회${cr.legacyUncounted?' · 이전 버전의 요청 횟수는 미집계':''}`:'새 작업 기본값: 꺼짐 · 시작 전에 선택하세요.';
     const mismatch=false; // Multi-keyword jobs legitimately differ from current search URL.
     $('sb-stale').style.display=mismatch?'':'none';
     $('sb-phase').textContent=clientError?'오류':(s.phase||'대기 중');
@@ -178,12 +194,13 @@
     const btn=mode==='auto'?$('sb-auto'):$('sb-current');
     log(`${mode==='auto'?'전체 자동':'현재 화면'} 추출 클릭 · ${from}~${to}`);
     btn.textContent='시작 요청 중…';$('sb-phase').textContent='시작 요청 중';$('sb-stage').textContent='백그라운드 작업 등록 확인 중';
-    $('sb-current').disabled=$('sb-auto').disabled=true;
-    try{const settings={owner:$('sb-owner').value,keywords:$('sb-keywords').value,minReviews:$('sb-minreviews').value,maxReviews:$('sb-maxreviews').value,reviewsEnabled:$('sb-reviewfilter').checked,grouped:$('sb-grouped').value,ads:$('sb-ads').value};await request({action:'sb:start',from,to,mode,settings},6500);log('시작 요청 접수 확인');await new Promise(r=>setTimeout(r,250));}
+    $('sb-current').disabled=$('sb-auto').disabled=true;renderCatalogChoice();
+    try{const settings={catalogLookup:catalogDraft,owner:$('sb-owner').value,keywords:$('sb-keywords').value,minReviews:$('sb-minreviews').value,maxReviews:$('sb-maxreviews').value,reviewsEnabled:$('sb-reviewfilter').checked,grouped:$('sb-grouped').value,ads:$('sb-ads').value};await request({action:'sb:start',from,to,mode,settings},6500);log('시작 요청 접수 확인');await new Promise(r=>setTimeout(r,250));}
     catch(e){error(e);}
     finally{waiting=false;btn.textContent=mode==='auto'?'전체 자동 추출':'현재 화면 추출';void refresh();}
   }
   $('sb-current').onclick=()=>begin('current');$('sb-auto').onclick=()=>begin('auto');
+  $('sb-catalog-toggle').onclick=()=>{if($('sb-catalog-toggle').disabled)return;catalogDraft=!catalogDraft;renderCatalogChoice();};
   $('sb-pause').onclick=async()=>{try{const r=await request({action:'sb:pause'});render(r.state);}catch(e){error(e);}};
   $('sb-stop').onclick=async()=>{try{const plus=snapshot?.collection?.source==='plus';if(!plus&&!confirm('현재 전체 작업을 중단할까요? 저장된 기록은 남고 이어하기가 필요할 수 있습니다.'))return;const r=await request({action:'sb:stop'});render(r.state);}catch(e){error(e);}};
   $('sb-resume').onclick=async()=>{try{const r=await request({action:'sb:resume'});render(r.state);}catch(e){error(e);}};
@@ -205,20 +222,20 @@
   $('sb-download').onclick=()=>{saveCsv(snapshot?.matched||[],`유승빈 DB추출_${cleanName()}_${date()}.csv`,cols);log('영업관리표 16열 CSV 다운로드');};
   $('sb-review-download').onclick=()=>{saveCsv(snapshot?.review||[],`유승빈 DB추출_보류_${cleanName()}_${date()}.csv`,[['검색어','keyword'],['페이지','page'],['업체식별번호','mallSeq'],['네이버상품번호','nvMid'],['스토어명','storeName'],['상품명','productName'],['상품링크','productUrl'],['보류사유','reason'],['특이사항','memo'],['스토어주소','storeUrl'],['대표자','ceoName'],['확인된 연락처','phoneNumber'],['전체 연락처 후보','phoneCandidates'],['주소','address'],['원본 관측 상품주소','observedProductUrl'],['조회 경로','lookupOrigin'],['HTTP 상태','lookupHttpStatus'],['조회 API','lookupEndpoint'],['서버 오류','lookupServerMessage']]);log('확인 보류 CSV 다운로드');};
   $('sb-copyrows').onclick=async()=>{const rows=snapshot?.matched||[];const tsv=rows.map(r=>cols.map(c=>cell(r[c[1]]).replace(/[\t\r\n]+/g,' ')).join('\t')).join('\r\n');try{await navigator.clipboard.writeText(tsv);log(`영업관리표 행 ${rows.length}건 복사 완료(헤더 제외)`);alert(`${rows.length}개 행을 복사했어요. 스프레드시트의 첫 빈 행 첫 칸에 붙여넣으세요.`);}catch(e){error('클립보드 복사 실패: '+(e.message||e));}};
-  $('sb-copylog').onclick=async()=>{const data=[`유승빈 DB추출기 v3.26 (${new Date().toLocaleString('ko-KR')})`,`상태: ${$('sb-phase').textContent}`,...recentLogs,...(snapshot?.logs||[])].join('\n');try{await navigator.clipboard.writeText(data);log('진단 기록 복사 완료');}catch(e){error(e);}};
+  $('sb-copylog').onclick=async()=>{const data=[`유승빈 DB추출기 v3.27 (${new Date().toLocaleString('ko-KR')})`,`상태: ${$('sb-phase').textContent}`,...recentLogs,...(snapshot?.logs||[])].join('\n');try{await navigator.clipboard.writeText(data);log('진단 기록 복사 완료');}catch(e){error(e);}};
   // 통합 진단 패키지는 사용자가 직접 버튼을 누를 때만 생성됩니다.
   // 인증 쿠키, 토큰, 원시 HTTP 헤더, 사업자번호 인덱스는 포함하지 않습니다.
   function fullDiagnostic(){
     const s=snapshot||{};const pages=s.auditPages||[];
-    const totals={};for(const key of ['searchProducts','rawNaver','rawExternal','rawUnknown','rawCatalogRepresentatives','apiOffers','apiNaver','apiExternal','rawAdded','offerAdded','added','scanRepresentativeCandidates','scanCoverageUnverified','scanRawUnique','scanUnidentifiedUnique','scanNestedExcluded','scanAmbiguousCards']){
+    const totals={};for(const key of ['searchProducts','rawNaver','rawExternal','rawUnknown','rawCatalogRepresentatives','apiOffers','apiNaver','apiExternal','rawAdded','offerAdded','added','catalogsDisabled','scanRepresentativeCandidates','scanCoverageUnverified','scanRawUnique','scanUnidentifiedUnique','scanNestedExcluded','scanAmbiguousCards']){
       totals[key]=pages.reduce((v,p)=>v+(Number(p[key])||0),0);
     }
     return {
-      report:'유승빈 DB추출기 통합 진단',schema:'sb-diagnostic-v1',version:'3.26',
+      report:'유승빈 DB추출기 통합 진단',schema:'sb-diagnostic-v1',version:'3.27',
       exportedAt:new Date().toISOString(),searchPage:location.origin+location.pathname,keyword:s.keyword||currKeyword(),
       status:s.phase||'',stage:s.stage||'',startedAt:s.startedAt?new Date(s.startedAt).toISOString():null,
       finishedAt:s.finishedAt?new Date(s.finishedAt).toISOString():null,
-      settings:s.settings||{},stats:s.statistics||{},totals,
+      settings:s.settings||{},catalogRequests:s.catalogRequests||null,stats:s.statistics||{},totals,
       collection:s.collection?{source:s.collection.source,mode:s.collection.mode,from:s.collection.from,to:s.collection.to,
         keywordIndex:s.collection.keywordIndex,nextPage:s.collection.nextPage,savedProducts:s.collection.products?.length||0,
         waiting:s.collection.pageWait?{keyword:s.collection.pageWait.keyword,page:s.collection.pageWait.page,fromPage:s.collection.pageWait.fromPage,
@@ -234,7 +251,7 @@
   function saveDiagnosticFile(contents){
     const blob=new Blob(['\ufeff',contents],{type:'application/json;charset=utf-8'});
     const url=URL.createObjectURL(blob),a=document.createElement('a');
-    a.href=url;a.download=`유승빈_전체진단_${cleanName()}_${date()}_v3.26.json`;
+    a.href=url;a.download=`유승빈_전체진단_${cleanName()}_${date()}_v3.27.json`;
     document.documentElement.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);
   }
   $('sb-all-copy').onclick=async()=>{

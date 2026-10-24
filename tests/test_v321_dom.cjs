@@ -57,6 +57,7 @@ test('a catalog representative without a seller ID survives collection for offer
   assert.equal(scan.representativeKeys.length,2);assert.equal(scan.records.length,2);
   const catalog=scan.records.find(x=>x.isCatalogRepresentative);assert.equal(catalog.catalogUrlId,'5000');assert.equal(catalog.mallSeq,'');
   const j=e.api.setJob();let called='';e.api.override({inspectCatalogOffers:async(_,id)=>{called=id;return {ok:true,totalKnown:true,totalCount:0,products:[]};}});
+  e.api.state.settings.catalogLookup=true; // Explicit ON for the existing expansion regression.
   await e.api.expandCatalogsOnPage(j,{products:[]},'test',1,scan.records);assert.equal(called,'5000');dom.window.close();
 });
 test('real DOM conflicting URL metadata is marked before business lookup',async()=>{

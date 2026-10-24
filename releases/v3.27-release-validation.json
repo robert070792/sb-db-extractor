@@ -1,0 +1,32 @@
+{
+  "version": "3.27",
+  "testFiles": 17,
+  "testUnits": 159,
+  "passed": 159,
+  "failed": 0,
+  "javascriptSyntaxFiles": 26,
+  "pythonSyntaxPassed": true,
+  "zipCRCValid": true,
+  "zipSourceBytesMatch": true,
+  "isolatedNpmCiPassed": true,
+  "isolatedZipTestsPassed": 159,
+  "olderArchivesUnchanged": [
+    "3.21",
+    "3.22",
+    "3.23",
+    "3.24",
+    "3.25",
+    "3.26"
+  ],
+  "sha256": "4e5da76bf3ed3ab0eb429784f5e48de2dd8bd732b5830b20346171ef04f9a3da",
+  "catalogToggle": {
+    "defaultAfterReset": "off",
+    "offMockFetches": 0,
+    "onMockFetches": 1,
+    "currentAndAutoModeVerified": true,
+    "legacyJobsRetainOnWithUncountedHistory": true,
+    "pauseResumeAndUIExportVerified": true
+  },
+  "realNaverAndCompanyAPIVerified": false,
+  "naverHTTP418Resolved": false
+}
