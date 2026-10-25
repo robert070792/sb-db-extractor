@@ -42,7 +42,7 @@ async function runtime(options={}){
     prepareBusinessLookup,executePreparedBusinessLookup,normalizeCachedData,
     enrichStoreUrls:C.enrichStoreUrls,processPending,collect,collectPrice,collectPlus,loadScrollPage,
     expandCatalogsOnPage,inspectCatalogOffers,toNaverCatalogOffer,fetchCatalogOfferPage,recordScanAudit,reconcilePage,
-    pageEvidence,navigatePrice,reloadPricePage,inspectPriceDocument,ensureKeyword,waitForPricePageChange,runJob,flagSharedPhones,
+    pageEvidence,navigatePrice,reloadPricePage,settleReloadPagination,inspectPriceDocument,ensureKeyword,waitForPricePageChange,runJob,flagSharedPhones,
     getState,lookupAlreadyRequested,recordLookupRequest,finishLookupRequest,
     get state(){return state;},get ledger(){return lookupLedger;},get job(){return job;},
     setState(value){state={...blank(),...value,statistics:{...blankStats(),...(value.statistics||{})}};return state;},

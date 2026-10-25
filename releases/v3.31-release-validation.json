@@ -1,0 +1,37 @@
+{
+  "version": "3.31",
+  "testFiles": 21,
+  "testUnits": 200,
+  "passed": 200,
+  "failed": 0,
+  "javascriptSyntaxFiles": 30,
+  "pythonSyntaxPassed": true,
+  "zipCRCValid": true,
+  "zipSourceBytesMatch": true,
+  "isolatedNpmCiPassed": true,
+  "isolatedZipTestsPassed": 200,
+  "olderArchivesUnchanged": [
+    "3.21",
+    "3.22",
+    "3.23",
+    "3.24",
+    "3.25",
+    "3.26",
+    "3.27",
+    "3.28",
+    "3.29",
+    "3.30"
+  ],
+  "sha256": "3e592706ba6f864f9d7d96b904fbce07f34d743c74bac92a81eea31373e3b1ac",
+  "reloadPagination": {
+    "lazyGrowthMockVerified": true,
+    "bottomStableMinimumMs": 1800,
+    "maxPreparationSteps": 80,
+    "confirmedNoClickReservationReleased": true,
+    "ambiguousClickReservationRetained": true,
+    "providedV330DiagnosticMigrationReplayed": true
+  },
+  "realUserLayoutCauseConfirmed": false,
+  "realNaverAndCompanyAPIVerified": false,
+  "naverHTTP418Resolved": false
+}

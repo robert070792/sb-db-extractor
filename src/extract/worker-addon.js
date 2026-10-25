@@ -1,4 +1,4 @@
-/* 유승빈 DB추출기 v3.30: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
+/* 유승빈 DB추출기 v3.31: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
 (() => {
   'use strict';
   const KEY='sb_leads_v20_state'; // chrome.storage.local: 컴퓨터 + Chrome 프로필별, sync 사용 안 함
@@ -32,6 +32,14 @@
       const legacyCatalog=typeof saved.settings?.catalogLookup!=='boolean'&&!!(saved.startedAt||saved.collection||saved.pending?.length);
       state.settings={...state.settings,catalogLookup:legacyCatalog?true:state.settings.catalogLookup===true};
       state.settings.reloadAfterPageChange=state.settings.reloadAfterPageChange===true;
+      // v3.30 reserved a re-click even when the returned position check proved no click occurred.
+      const reload=state.collection?.reloadPlan,clickFailure=state.collection?.pageWait?.clickFailure;
+      const oldPositionRejection=clickFailure?.ok===false&&['BUTTON_OUTSIDE','BUTTON_MOVED'].includes(clickFailure.code)&&clickFailure.positionAttempts?.length>0&&clickFailure.positionAttempts.every(x=>x.ok===false&&['BUTTON_OUTSIDE','BUTTON_MOVED'].includes(x.code));
+      if(reload?.phase==='reclick-reserved'&&reload.reclickIssued&&(clickFailure?.clicked===false||oldPositionRejection)){
+        reload.reclickIssued=false;reload.phase='reclick-not-sent';reload.reservationReleased='반환된 클릭 전 위치 검사 실패 확인';
+        state.pageReloads=(state.pageReloads||[]).map(x=>x.id===reload.id?JSON.parse(JSON.stringify(reload)):x);
+      }
+
       state.catalogRequests=saved.catalogRequests||{...blankCatalogRequests(),legacyUncounted:legacyCatalog};
       state.seen=[...new Set((state.seen||[]).map(str))];
       state.lookupAttempted=[...new Set((state.lookupAttempted||[]).map(str))];
@@ -473,7 +481,7 @@
     const links=groups[0]?.links||[...document.querySelectorAll('a[class*="pagination_btn_page"][data-shp-contents-type="pageNo"]')].filter(el=>visible(el)&&/^(?:[1-9]|10)$/.test((el.textContent||'').trim()));
     const numeric=links.map(el=>({el,page:Number(el.textContent.trim())}));
     const available=[...new Set(numeric.map(x=>x.page))].sort((a,b)=>a-b);
-    if(available.length<1)return {ok:false,reason:'가격비교 페이지 번호 링크를 찾지 못했습니다.',available};
+    if(available.length<1)return {ok:false,clicked:false,reason:'가격비교 페이지 번호 링크를 찾지 못했습니다.',available};
     let chosen=numeric.find(x=>x.page===targetPage),navigation='number';
     if(!chosen&&Number.isInteger(fromPage)&&fromPage!==targetPage&&targetPage>=1&&targetPage<=10){
       const scope=groups[0]?.root.closest('[class*="pagination_pagination"]')||groups[0]?.root.parentElement;
@@ -481,7 +489,7 @@
       const el=[...(scope?.querySelectorAll('a,button')||[])].find(x=>visible(x)&&!x.disabled&&x.getAttribute('aria-disabled')!=='true'&&x.matches(`[class*="pagination_${navigation}"]`));
       if(el)chosen={el,page:null};
     }
-    if(!chosen)return {ok:false,reason:`${targetPage}페이지 또는 해당 방향의 실제 이동 버튼이 없습니다.`,available};
+    if(!chosen)return {ok:false,clicked:false,reason:`${targetPage}페이지 또는 해당 방향의 실제 이동 버튼이 없습니다.`,available};
     // 클릭 전에 실제 페이지 번호 링크 주소를 보존합니다. 클릭 후 SPA가 링크 DOM을 교체할 수 있습니다.
     const linkHref=String(chosen.el.href||chosen.el.getAttribute('href')||'');
     const selection=[...(groups[0]?.root.querySelectorAll('[aria-current="page"],[aria-selected="true"],[class*="active"],[class*="current"],strong')||[])].map(el=>(el.textContent||'').trim()).join('|');
@@ -508,7 +516,7 @@
     const viewport=rect(),bounds=screen();
     const clipped={left:Math.max(viewport.left,bounds.left),top:Math.max(viewport.top,bounds.top),right:Math.min(viewport.right,bounds.right),bottom:Math.min(viewport.bottom,bounds.bottom)};
     const x=(clipped.left+clipped.right)/2,y=(clipped.top+clipped.bottom)/2;
-    const fail=(reason,code='BUTTON_NOT_READY')=>({ok:false,reason,code,available,viewport,screen:bounds,clipped,visibility:document.visibilityState,preparedViewport:prepared?.viewport||null});
+    const fail=(reason,code='BUTTON_NOT_READY')=>({ok:false,clicked:false,reason,code,available,viewport,screen:bounds,clipped,visibility:document.visibilityState,preparedViewport:prepared?.viewport||null});
     if(!prepared||prepared.el!==chosen.el||prepared.targetPage!==targetPage||prepared.fromPage!==fromPage||prepared.href!==location.href||prepared.selection!==selection)
       return fail('페이지 버튼 준비 상태가 바뀌었습니다. 화면을 확인한 뒤 이어하기를 누르세요.');
     const waitedMs=Math.round(performance.now()-prepared.at);
@@ -579,7 +587,7 @@
     }
     window.__sbPageWatch323=watch;
     chosen.el.click();
-    return {ok:true,clickedPage:chosen.page,navigation,available,linkHref,clickViewport};
+    return {ok:true,clicked:true,clickedPage:chosen.page,navigation,available,linkHref,clickViewport};
   }
   async function performPriceKeywordSearch(keyword,method='button'){
     // React 입력값과 DOM 입력값이 어긋난 상태에서 빈 문자열로 검색되지 않도록
@@ -1113,6 +1121,39 @@
     }
     throw Error('새로고침 후 실제 페이지 번호·상품 로딩을 확인하지 못했습니다. 수집을 멈추고 화면 확인을 기다립니다.');
   }
+  async function settleReloadPagination(j,tabId,keyword,page,plan){
+    let last='',stableSince=0,stableSamples=0;
+    plan.positioning={page,phase:'loading-footer',steps:0,samples:[],bottomConfirmed:false};
+    await saveReloadPlan(j,plan);
+    await log(j,`${keyword} · 새로고침 후 ${page}페이지 하단 로딩 · ${plan.targetPage}페이지 버튼 준비`);
+    for(let step=0;step<80;step++){
+      await waitIfPaused(j);assertActive(j);
+      const [data,pager]=await Promise.all([inspect(tabId),inspectPager(tabId)]);
+      let query='';try{query=new URL(data?.url||'').searchParams.get('query')||'';}catch{}
+      if(pager?.domCurrent!==page||pager?.urlPage!==page||query!==keyword)throw Error('하단 버튼 준비 중 페이지 또는 검색어가 바뀌었습니다. 화면을 확인한 뒤 이어하기를 누르세요.');
+      if(data?.challenge)throw Error('하단 버튼 준비 중 네이버 보안 확인이 필요합니다. 직접 확인한 뒤 이어하기를 누르세요.');
+      if(data?.loading){stableSince=0;stableSamples=0;last='';await pause(650);continue;}
+      requireScrollPage(data,pager,page);
+      const y=Number(data.scrollY),height=Number(data.scrollHeight),view=Number(data.viewHeight);
+      if(![y,height,view].every(Number.isFinite)||height<=0||view<=0)throw Error('하단 버튼 준비 중 스크롤 높이를 확인하지 못했습니다.');
+      const bottom=y+view>=height-12,signature=productSignature(data),fingerprint=[height,y,signature].join('|');
+      if(bottom&&fingerprint===last){stableSamples++;}else{stableSince=Date.now();stableSamples=1;}
+      last=fingerprint;
+      const metric={step:step+1,scrollY:y,scrollHeight:height,viewHeight:view,products:data.records.length,bottom};
+      Object.assign(plan.positioning,{steps:step+1,last:metric,stableMs:bottom?Date.now()-stableSince:0});
+      plan.positioning.samples.push(metric);plan.positioning.samples=plan.positioning.samples.slice(-12);
+      if(bottom&&stableSamples>=4&&Date.now()-stableSince>=1800){
+        plan.positioning.phase='ready';plan.positioning.bottomConfirmed=true;await saveReloadPlan(j,plan);
+        await log(j,`${keyword} ${page}페이지 · 하단 로딩 안정 확인 (${data.records.length}개 관측) · 목표 버튼 위치 확인`);
+        return data;
+      }
+      if(step%5===0){await patch(j,{stage:`새로고침 후 ${page}페이지 하단 로딩 ${step+1}/80 · ${plan.targetPage}페이지 버튼 준비`});await saveReloadPlan(j,plan);}
+      if(!bottom)await scroll(tabId);
+      await pause(650);
+    }
+    plan.positioning.phase='not-settled';await saveReloadPlan(j,plan);
+    throw Error('새로고침 후 하단 로딩이 안정되지 않아 페이지 버튼을 누르지 않았습니다. 로딩 완료 후 이어하기를 누르세요.');
+  }
   async function reloadPricePage(j,tabId,keyword,targetPage,reason){
     const c=state.collection;if(!c)throw Error('새로고침 전에 저장할 수집 상태가 없습니다.');
     let plan=c.reloadPlan;
@@ -1144,13 +1185,20 @@
         return {...ready,proof:'새로고침 후 실제 페이지·상품 확인'};
       }
       if(plan.reclickIssued)throw Error('새로고침 후 목표 페이지 재클릭은 이미 1회 실행했습니다. 실제 목표 페이지를 확인한 뒤 이어하기를 누르세요.');
-      const baseline=pageEvidence(ready.data);
+      const positionedData=await settleReloadPagination(j,tabId,keyword,ready.actual,plan);
+      const baseline=pageEvidence(positionedData);
       plan.reclickIssued=true;plan.retryFromPage=ready.actual;plan.retryBaseline=baseline;plan.phase='reclick-reserved';
       j.navigationAttempt={keyword,targetPage,fromPage:ready.actual,beforeEvidence:baseline};
       await checkpointPriceNavigation(j);await saveReloadPlan(j,plan);
-      await log(j,`${keyword} · 새로고침 후 ${ready.actual}페이지로 복원됨 · 실제 ${targetPage}페이지 버튼 1회 재클릭`);
+      await log(j,`${keyword} · 새로고침 후 ${ready.actual}페이지 하단 로딩 완료 · ${targetPage}페이지 재클릭 준비`);
       const clicked=await clickPage(tabId,targetPage,ready.actual,j);
-      if(!clicked?.ok)throw Object.assign(Error(clicked?.reason||'새로고침 후 목표 페이지 버튼을 확인하지 못했습니다.'),{clickFailure:clicked});
+      if(!clicked?.ok){
+        // Only a returned pre-click rejection proves that no click was sent.
+        if(clicked?.clicked===false){plan.reclickIssued=false;plan.phase='reclick-not-sent';await saveReloadPlan(j,plan);}
+        throw Object.assign(Error(clicked?.reason||'새로고침 후 목표 페이지 버튼을 확인하지 못했습니다.'),{clickFailure:clicked});
+      }
+      plan.phase='reclick-sent';await saveReloadPlan(j,plan);
+      await log(j,`${keyword} · 실제 ${targetPage}페이지 버튼 재클릭 완료`);
       j.navigationDirection=clicked.navigation;
       const after=await waitForPricePageChange(j,tabId,clicked.clickedPage,baseline,ready.actual,15000);
       if(after.actual!==targetPage)throw Error(`새로고침 후 목표 ${targetPage}페이지 대신 ${after.actual}페이지가 표시됐습니다. 화면을 확인하세요.`);

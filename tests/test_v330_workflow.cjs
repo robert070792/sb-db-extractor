@@ -15,7 +15,7 @@ function attach(e,b){
  e.api.override({
   inspectPriceDocument:async()=>({timeOrigin:b.epoch,origin:'https://search.shopping.naver.com',path:'/search/all',keyword:b.query,page:b.urlPage}),
   inspectPager:async()=>({domCurrent:b.selected,urlPage:b.urlPage,confidence:'high'}),
-  inspect:async()=>({url:url(b.urlPage).replace('query=test','query='+b.query),records:rows(b.productPage),lifecycle:b.life,loading:false}),
+  inspect:async()=>({url:url(b.urlPage).replace('query=test','query='+b.query),records:rows(b.productPage),lifecycle:b.life,loading:false,scrollY:300,scrollHeight:1000,viewHeight:700}),
   clickPage:async(_,p)=>{
    const from=b.selected;b.selected=p;b.clicks.push(p);b.counts[p]=(b.counts[p]||0)+1;
    const fail=b.persistent||(b.failFirst&&b.counts[p]===1),status=fail?418:200;
