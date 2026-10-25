@@ -1,4 +1,4 @@
-/* 유승빈 DB추출기 v3.28: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
+/* 유승빈 DB추출기 v3.29: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
 (() => {
   'use strict';
   const KEY='sb_leads_v20_state'; // chrome.storage.local: 컴퓨터 + Chrome 프로필별, sync 사용 안 함
@@ -465,7 +465,7 @@
     return {current:domCurrent??urlPage,domCurrent,selected:domCurrent,urlPage,disagree,method:domCurrent!==null?method:'URL만 확인',confidence:domCurrent!==null?'high':urlPage!==null?'low':'none',numbers,href:location.href,groupFound:links.length>=1};
   }
   // 페이지 번호는 화면에 표시된 텍스트로만 선택. '이전/다음' 링크의 data-shp-contents-id를 읽지 않습니다.
-  function clickPricePagination(targetPage,fromPage,prepare=false){
+  function clickPricePagination(targetPage,fromPage,prepare=false,correctPosition=false){
     const visible=el=>{if(!el?.getBoundingClientRect)return false;const r=el.getBoundingClientRect(),st=getComputedStyle(el);return r.width>0&&r.height>0&&st.display!=='none'&&st.visibility!=='hidden';};
     const groups=[...document.querySelectorAll('[class*="pagination_num"]')].filter(visible).map(root=>({root,links:[...root.querySelectorAll('a[class*="pagination_btn_page"][data-shp-contents-type="pageNo"]')].filter(el=>visible(el)&&/^(?:[1-9]|10)$/.test((el.textContent||'').trim()))})).filter(g=>g.links.length>=1);
     groups.sort((a,b)=>b.links.length-a.links.length);
@@ -485,27 +485,41 @@
     const linkHref=String(chosen.el.href||chosen.el.getAttribute('href')||'');
     const selection=[...(groups[0]?.root.querySelectorAll('[aria-current="page"],[aria-selected="true"],[class*="active"],[class*="current"],strong')||[])].map(el=>(el.textContent||'').trim()).join('|');
     const rect=()=>{const r=chosen.el.getBoundingClientRect();return {left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height};};
+    const screen=()=>{
+      const v=window.visualViewport;
+      const width=document.documentElement.clientWidth||innerWidth,height=document.documentElement.clientHeight||innerHeight;
+      const left=Math.max(0,v?.offsetLeft||0),top=Math.max(0,v?.offsetTop||0);
+      return {left,top,right:Math.min(width,v?.width>0?left+v.width:width),bottom:Math.min(height,v?.height>0?top+v.height:height),width,height};
+    };
     if(prepare){
-      chosen.el.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});
+      chosen.el.scrollIntoView({block:'center',inline:'center',behavior:'instant'});
+      if(correctPosition){
+        // Lazy layout or horizontal overflow may leave the button outside the visible viewport.
+        const r=rect(),v=screen();
+        if(r.left<v.left||r.right>v.right||r.top<v.top||r.bottom>v.bottom)
+          window.scrollBy({left:r.left+r.width/2-(v.left+v.right)/2,top:r.top+r.height/2-(v.top+v.bottom)/2,behavior:'instant'});
+      }
       const viewport=rect();
       window.__sbPagerPrepared328={el:chosen.el,targetPage,fromPage,href:location.href,selection,viewport,at:performance.now()};
-      return {ok:true,prepared:true,available,viewport};
+      return {ok:true,prepared:true,available,viewport,screen:screen()};
     }
     const prepared=window.__sbPagerPrepared328;delete window.__sbPagerPrepared328;
-    const viewport=rect(),x=viewport.left+viewport.width/2,y=viewport.top+viewport.height/2;
-    const fail=reason=>({ok:false,reason,available,viewport});
+    const viewport=rect(),bounds=screen();
+    const clipped={left:Math.max(viewport.left,bounds.left),top:Math.max(viewport.top,bounds.top),right:Math.min(viewport.right,bounds.right),bottom:Math.min(viewport.bottom,bounds.bottom)};
+    const x=(clipped.left+clipped.right)/2,y=(clipped.top+clipped.bottom)/2;
+    const fail=(reason,code='BUTTON_NOT_READY')=>({ok:false,reason,code,available,viewport,screen:bounds,clipped,visibility:document.visibilityState,preparedViewport:prepared?.viewport||null});
     if(!prepared||prepared.el!==chosen.el||prepared.targetPage!==targetPage||prepared.fromPage!==fromPage||prepared.href!==location.href||prepared.selection!==selection)
       return fail('페이지 버튼 준비 상태가 바뀌었습니다. 화면을 확인한 뒤 이어하기를 누르세요.');
     const waitedMs=Math.round(performance.now()-prepared.at);
     if(waitedMs<600||waitedMs>5000)return fail('페이지 버튼 표시 대기가 완료되지 않았거나 만료됐습니다. 이어하기를 누르세요.');
     if(document.visibilityState==='hidden')return fail('네이버 쇼핑 탭을 화면에 표시한 뒤 이어하기를 누르세요.');
     if(!chosen.el.isConnected||!visible(chosen.el)||chosen.el.disabled||chosen.el.getAttribute('aria-disabled')==='true')return fail('페이지 버튼이 사라졌거나 비활성화됐습니다.');
-    if(![viewport.left,viewport.top,viewport.right,viewport.bottom].every(Number.isFinite)||viewport.left<0||viewport.top<0||viewport.right>innerWidth||viewport.bottom>innerHeight)
-      return fail('페이지 버튼이 화면 밖에 있어 클릭하지 않았습니다. 버튼을 화면에 표시한 뒤 이어하기를 누르세요.');
-    if(['left','top','right','bottom'].some(k=>Math.abs(viewport[k]-prepared.viewport[k])>2))return fail('페이지 버튼 위치가 바뀌어 클릭하지 않았습니다. 화면이 멈춘 뒤 이어하기를 누르세요.');
+    if(![viewport.left,viewport.top,viewport.right,viewport.bottom].every(Number.isFinite)||clipped.right-clipped.left<Math.min(8,viewport.width)||clipped.bottom-clipped.top<Math.min(8,viewport.height))
+      return fail('페이지 버튼의 클릭 가능한 영역이 화면 밖에 있습니다. 버튼을 화면에 표시한 뒤 이어하기를 누르세요.','BUTTON_OUTSIDE');
+    if(['left','top','right','bottom'].some(k=>Math.abs(viewport[k]-prepared.viewport[k])>2))return fail('페이지 버튼 위치가 바뀌어 클릭하지 않았습니다. 화면이 멈춘 뒤 이어하기를 누르세요.','BUTTON_MOVED');
     const hit=document.elementFromPoint(x,y);
     if(!hit||!(hit===chosen.el||chosen.el.contains(hit)))return fail('페이지 버튼이 다른 창에 가려져 클릭하지 않았습니다. 추출기 창을 옮기거나 접은 뒤 이어하기를 누르세요.');
-    const clickViewport={...viewport,x,y,waitedMs,unobstructed:true};
+    const clickViewport={...viewport,x,y,screen:bounds,clipped,waitedMs,unobstructed:true};
     // 검색 요청만 관측합니다. 추가 요청이나 응답 본문/쿠키/헤더 읽기는 하지 않습니다.
     // fetch의 반환 Promise, XHR의 반환값과 예외는 원본 그대로 유지합니다.
     if(!window.__sbSearchNetwork325){
@@ -884,12 +898,19 @@
   }
   function productSignature(data){return (data?.records||[]).map(x=>x.mallSeq+':'+(x.chnlProdNo||x.nvMid)).sort().join('|');}
   async function clickPage(tabId,page,currentPage,j){
-    const prepared=await chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:clickPricePagination,args:[page,currentPage,true]});
-    if(!prepared?.[0]?.result?.ok)return prepared?.[0]?.result;
-    await pause(650);
-    if(j){assertActive(j);await waitIfPaused(j);}
-    const r=await chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:clickPricePagination,args:[page,currentPage]});
-    return r?.[0]?.result;
+    const positionAttempts=[];
+    for(let attempt=0;attempt<3;attempt++){
+      if(j){assertActive(j);await waitIfPaused(j);}
+      const prepared=await chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:clickPricePagination,args:[page,currentPage,true,attempt>0]});
+      if(!prepared?.[0]?.result?.ok)return {...prepared?.[0]?.result,positionAttempts};
+      await pause(650);
+      if(j){assertActive(j);await waitIfPaused(j);}
+      const r=await chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:clickPricePagination,args:[page,currentPage]});
+      const result=r?.[0]?.result||{ok:false,reason:'페이지 버튼 확인 응답이 없습니다.'};
+      positionAttempts.push({attempt:attempt+1,ok:!!result.ok,code:result.code||'',viewport:result.viewport||result.clickViewport||null,screen:result.screen||result.clickViewport?.screen||null,preparedViewport:prepared[0].result.viewport});
+      if(result.ok||!['BUTTON_OUTSIDE','BUTTON_MOVED'].includes(result.code)||attempt===2)return {...result,positionAttempts};
+      // Only adjust position before a click. Never retry a click or a failed search request here.
+    }
   }
   async function inspectPager(tabId){
     const r=await chrome.scripting.executeScript({target:{tabId},world:'ISOLATED',func:inspectPricePagination});
@@ -1080,7 +1101,11 @@
       await checkpointPriceNavigation(j);
       await patch(j,{stage:`현재 ${actual??'미확인'}페이지 → ${targetPage}페이지 버튼 이동 중`});
       const clicked=await clickPage(tabId,targetPage,actual,j);
-      if(!clicked?.ok)throw Error(clicked?.reason||`${targetPage}페이지 버튼을 찾지 못했습니다. 현재 ${actual??'미확인'}페이지, 보이는 번호 ${(clicked?.available||[]).join(', ')||'없음'}`);
+      if(!clicked?.ok){
+        const error=Error(clicked?.reason||`${targetPage}페이지 버튼을 찾지 못했습니다. 현재 ${actual??'미확인'}페이지, 보이는 번호 ${(clicked?.available||[]).join(', ')||'없음'}`);
+        error.clickFailure={targetPage,fromPage:actual,code:clicked?.code||'BUTTON_NOT_FOUND',viewport:clicked?.viewport||null,screen:clicked?.screen||null,clipped:clicked?.clipped||null,positionAttempts:clicked?.positionAttempts||[]};
+        throw error;
+      }
       await log(j,`${keyword} · ${clicked.clickedPage??(clicked.navigation==='prev'?'이전':'다음')}페이지 버튼 클릭${clicked.clickViewport?` · 화면 내 가림 없음 · ${clicked.clickViewport.waitedMs}ms 대기`:''}`);
       j.navigationDirection=clicked.navigation;
       // 실패 후 왕복 클릭·스크롤 없이 저장한 위치에서 대기합니다.
@@ -1258,7 +1283,7 @@
     const reason=str(error.message||error).slice(0,1000),label=`${keyword} ${page}페이지 (수집 확인 대기)`;
     const attempt=j.navigationAttempt?.keyword===keyword&&j.navigationAttempt.targetPage===page?j.navigationAttempt:null;
     c.nextPage=page;
-    c.pageWait={...(c.pageWait||{}),...(attempt||{}),keyword,page,reason,label,requestFailure:error.requestFailure||null,failedAt:Date.now()};
+    c.pageWait={...(c.pageWait||{}),...(attempt||{}),keyword,page,reason,label,requestFailure:error.requestFailure||null,clickFailure:error.clickFailure||null,failedAt:Date.now()};
     state.incompletePages=state.incompletePages||[];
     if(!state.incompletePages.includes(label))state.incompletePages.push(label);
     await save();
@@ -1644,8 +1669,8 @@
       if(!stopped&&e.code==='PAGE_WAIT'){
         j.waitingForPage=true;
         const page=state.collection?.nextPage;
-        const failed=state.collection?.pageWait?.requestFailure;
-        await patch(j,{phase:'페이지 확인 대기',error:'',stage:failed?`${state.collection.pageWait.reason}. 네이버 화면을 직접 확인하고 정상 상품이 표시된 뒤 이어하기를 누르세요.`:`${page}페이지 상품 갱신 미확인 · 스크롤 중지. 현재 네이버 화면의 상품 로딩을 확인한 뒤 이어하기를 누르세요.`,currentStore:''});
+        const waiting=state.collection?.pageWait;
+        await patch(j,{phase:'페이지 확인 대기',error:'',stage:waiting?.reason||`${page}페이지 상품 갱신 미확인 · 스크롤 중지. 현재 네이버 화면의 상품 로딩을 확인한 뒤 이어하기를 누르세요.`,currentStore:''});
         return;
       }
       await patch(j,{phase:stopped?'중단됨':'오류',error:stopped?'':(e.message||str(e)),stage:stopped?'사용자가 중단했습니다.':(e.message||str(e))});

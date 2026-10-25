@@ -1,9 +1,9 @@
-/* 유승빈 DB추출기 v3.28 - 기존 탭 재사용 / 사업자중복 / 로컬 이력 검색 결과 상단 UI */
+/* 유승빈 DB추출기 v3.29 - 기존 탭 재사용 / 사업자중복 / 로컬 이력 검색 결과 상단 UI */
 (()=>{
   if(document.getElementById('sb-leads-panel'))return;
   const root=document.createElement('section');root.id='sb-leads-panel';
   root.innerHTML=`
-    <div class="sb-header" id="sb-drag-handle" title="여기를 잡고 원하는 위치로 이동"><span class="sb-mark">SB</span><strong>유승빈 DB추출기</strong><small>v3.28</small><button id="sb-toggle" aria-label="패널 접기" title="접기">−</button></div>
+    <div class="sb-header" id="sb-drag-handle" title="여기를 잡고 원하는 위치로 이동"><span class="sb-mark">SB</span><strong>유승빈 DB추출기</strong><small>v3.29</small><button id="sb-toggle" aria-label="패널 접기" title="접기">−</button></div>
     <button id="sb-mini" type="button" title="유승빈 DB추출기 펼치기"><span class="sb-mini-mark">SB</span><span class="sb-mini-led"></span><span class="sb-mini-title">유승빈 DB추출기</span><span class="sb-mini-action">펼치기</span></button>
     <div id="sb-effect" class="sb-effect" aria-live="polite" aria-hidden="true"><span id="sb-effect-icon">✨</span><strong id="sb-effect-title">시작!</strong><span id="sb-effect-sub">추출 준비 중</span><div class="sb-confetti"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
     <div id="sb-body" class="sb-body">
@@ -222,7 +222,7 @@
   $('sb-download').onclick=()=>{saveCsv(snapshot?.matched||[],`유승빈 DB추출_${cleanName()}_${date()}.csv`,cols);log('영업관리표 16열 CSV 다운로드');};
   $('sb-review-download').onclick=()=>{saveCsv(snapshot?.review||[],`유승빈 DB추출_보류_${cleanName()}_${date()}.csv`,[['검색어','keyword'],['페이지','page'],['업체식별번호','mallSeq'],['네이버상품번호','nvMid'],['스토어명','storeName'],['상품명','productName'],['상품링크','productUrl'],['보류사유','reason'],['특이사항','memo'],['스토어주소','storeUrl'],['대표자','ceoName'],['확인된 연락처','phoneNumber'],['전체 연락처 후보','phoneCandidates'],['주소','address'],['원본 관측 상품주소','observedProductUrl'],['조회 경로','lookupOrigin'],['HTTP 상태','lookupHttpStatus'],['조회 API','lookupEndpoint'],['서버 오류','lookupServerMessage']]);log('확인 보류 CSV 다운로드');};
   $('sb-copyrows').onclick=async()=>{const rows=snapshot?.matched||[];const tsv=rows.map(r=>cols.map(c=>cell(r[c[1]]).replace(/[\t\r\n]+/g,' ')).join('\t')).join('\r\n');try{await navigator.clipboard.writeText(tsv);log(`영업관리표 행 ${rows.length}건 복사 완료(헤더 제외)`);alert(`${rows.length}개 행을 복사했어요. 스프레드시트의 첫 빈 행 첫 칸에 붙여넣으세요.`);}catch(e){error('클립보드 복사 실패: '+(e.message||e));}};
-  $('sb-copylog').onclick=async()=>{const data=[`유승빈 DB추출기 v3.28 (${new Date().toLocaleString('ko-KR')})`,`상태: ${$('sb-phase').textContent}`,...recentLogs,...(snapshot?.logs||[])].join('\n');try{await navigator.clipboard.writeText(data);log('진단 기록 복사 완료');}catch(e){error(e);}};
+  $('sb-copylog').onclick=async()=>{const data=[`유승빈 DB추출기 v3.29 (${new Date().toLocaleString('ko-KR')})`,`상태: ${$('sb-phase').textContent}`,...recentLogs,...(snapshot?.logs||[])].join('\n');try{await navigator.clipboard.writeText(data);log('진단 기록 복사 완료');}catch(e){error(e);}};
   // 통합 진단 패키지는 사용자가 직접 버튼을 누를 때만 생성됩니다.
   // 인증 쿠키, 토큰, 원시 HTTP 헤더, 사업자번호 인덱스는 포함하지 않습니다.
   function fullDiagnostic(){
@@ -231,7 +231,7 @@
       totals[key]=pages.reduce((v,p)=>v+(Number(p[key])||0),0);
     }
     return {
-      report:'유승빈 DB추출기 통합 진단',schema:'sb-diagnostic-v1',version:'3.28',
+      report:'유승빈 DB추출기 통합 진단',schema:'sb-diagnostic-v1',version:'3.29',
       exportedAt:new Date().toISOString(),searchPage:location.origin+location.pathname,keyword:s.keyword||currKeyword(),
       status:s.phase||'',stage:s.stage||'',startedAt:s.startedAt?new Date(s.startedAt).toISOString():null,
       finishedAt:s.finishedAt?new Date(s.finishedAt).toISOString():null,
@@ -239,7 +239,7 @@
       collection:s.collection?{source:s.collection.source,mode:s.collection.mode,from:s.collection.from,to:s.collection.to,
         keywordIndex:s.collection.keywordIndex,nextPage:s.collection.nextPage,savedProducts:s.collection.products?.length||0,
         waiting:s.collection.pageWait?{keyword:s.collection.pageWait.keyword,page:s.collection.pageWait.page,fromPage:s.collection.pageWait.fromPage,
-          reason:s.collection.pageWait.reason,requestFailure:s.collection.pageWait.requestFailure||null,failedAt:s.collection.pageWait.failedAt}:null}:null,
+          reason:s.collection.pageWait.reason,requestFailure:s.collection.pageWait.requestFailure||null,clickFailure:s.collection.pageWait.clickFailure||null,failedAt:s.collection.pageWait.failedAt}:null}:null,
       summary:{discovered:s.discovered||0,checked:s.scanned||0,matched:s.matched?.length||0,review:s.review?.length||0,
         pending:s.pending?.length||0,catalogWarnings:s.catalogWarnings||0,unidentifiedWarnings:s.unidentifiedWarnings||0,unidentifiedUniqueCandidates:s.unidentifiedUniqueCandidates??null,unidentifiedObservationCount:s.unidentifiedObservationCount??null,
         catalogBlockedReason:s.catalogBlockedReason||'',auditTruncated:s.auditTruncated||0,incompletePages:s.incompletePages||[],phoneDuplicates:s.phoneDuplicates||0},
@@ -251,7 +251,7 @@
   function saveDiagnosticFile(contents){
     const blob=new Blob(['\ufeff',contents],{type:'application/json;charset=utf-8'});
     const url=URL.createObjectURL(blob),a=document.createElement('a');
-    a.href=url;a.download=`유승빈_전체진단_${cleanName()}_${date()}_v3.28.json`;
+    a.href=url;a.download=`유승빈_전체진단_${cleanName()}_${date()}_v3.29.json`;
     document.documentElement.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);
   }
   $('sb-all-copy').onclick=async()=>{

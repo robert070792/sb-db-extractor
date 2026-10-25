@@ -1,0 +1,34 @@
+{
+  "version": "3.29",
+  "testFiles": 19,
+  "testUnits": 180,
+  "passed": 180,
+  "failed": 0,
+  "javascriptSyntaxFiles": 28,
+  "pythonSyntaxPassed": true,
+  "zipCRCValid": true,
+  "zipSourceBytesMatch": true,
+  "isolatedNpmCiPassed": true,
+  "isolatedZipTestsPassed": 180,
+  "olderArchivesUnchanged": [
+    "3.21",
+    "3.22",
+    "3.23",
+    "3.24",
+    "3.25",
+    "3.26",
+    "3.27",
+    "3.28"
+  ],
+  "sha256": "32665deaef932c9bbef3c80590354d4c5d0a5b8c6a7ae50fc9acaaf042864020",
+  "positionRecovery": {
+    "maxPreparations": 3,
+    "actualClickLimit": 1,
+    "threeToOneMockVerified": true,
+    "visibleIntersectionVerified": true,
+    "failureCoordinatesPersistAndExport": true
+  },
+  "realUserViewportCauseConfirmed": false,
+  "realNaverAndCompanyAPIVerified": false,
+  "naverHTTP418Resolved": false
+}
