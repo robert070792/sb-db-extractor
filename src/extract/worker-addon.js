@@ -1,4 +1,4 @@
-/* 유승빈 DB추출기 v3.31: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
+/* 유승빈 DB추출기 v3.32: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
 (() => {
   'use strict';
   const KEY='sb_leads_v20_state'; // chrome.storage.local: 컴퓨터 + Chrome 프로필별, sync 사용 안 함
@@ -1300,6 +1300,7 @@
     const products=new Map(),rawKeys=new Set(),unidentifiedKeys=new Set(),legacyWideKeys=new Set(),legacySellerWideKeys=new Set(),legacySafeKeys=new Set(),legacyAmbiguousKeys=new Set(),strictKeys=new Set();
     const legacyRejectedReasons={},legacyRejectedSamples=[];const representativeKeys=new Set(),representativeNoProviderKeys=new Set(),representativeNoProductKeys=new Set(),representativeDetails=new Map(),reconciledKeys=new Set();let flat=0,atBottom=0,lastY=-1,totalAds=0,totalLinkEvents=0,terminationReason='step-limit';
     let wrongPage=0,correctPage=0,scrollSamples=0,totalNestedExcluded=0,totalAmbiguousCards=0;
+    let bottomFingerprint='',bottomStableSince=0;const scrollTrace=[];
     for(let n=0;n<maxSteps;n++){
       await waitIfPaused(j);
       const [data,currentPager]=await Promise.all([inspect(tabId),inspectPager(tabId)]);
@@ -1337,9 +1338,13 @@
       const before=products.size;appendProducts(valid,products,page);
       flat=products.size===before?flat+1:0;
       const bottom=(data?.scrollY||0)+(data?.viewHeight||0)>=(data?.scrollHeight||0)-12;
-      atBottom=bottom?atBottom+1:0;
+      const fingerprint=[data?.scrollHeight,data?.scrollY,data?.viewHeight,productSignature(data),representativeKeys.size,unidentifiedKeys.size].join('|');
+      if(bottom&&fingerprint===bottomFingerprint){atBottom++;}else{atBottom=bottom?1:0;bottomStableSince=Date.now();}
+      bottomFingerprint=bottom?fingerprint:'';
+      scrollTrace.push({step:n+1,scrollY:data?.scrollY,scrollHeight:data?.scrollHeight,viewHeight:data?.viewHeight,products:products.size,bottom,stableMs:bottom?Date.now()-bottomStableSince:0});
+      if(scrollTrace.length>12)scrollTrace.shift();
       if(n%3===0)await patch(j,{stage:`${page}페이지 스크롤 ${n+1}/${maxSteps} · 확인한 상품 ${products.size}개`});
-      if(atBottom>=5&&flat>=4){terminationReason='bottom-stable';break;}
+      if(atBottom>=5&&flat>=4&&Date.now()-bottomStableSince>=3200){terminationReason='bottom-stable';break;}
       if(!bottom&&lastY===data?.scrollY&&flat>=8){terminationReason='scroll-stalled';break;}
       lastY=data?.scrollY;
       await scroll(tabId);await pause(bottom?800:SCROLL_DELAY);
@@ -1360,7 +1365,7 @@
         representativeNoProductId:representativeNoProductKeys.size,
         reconciledRepresentativeCount:reconciledKeys.size,unresolvedCandidates,
         terminationReason,reachedBottom:terminationReason==='bottom-stable',incomplete:terminationReason!=='bottom-stable',
-        scrollSamples,wrongPage,correctPage}};
+        scrollSamples,scrollTrace,wrongPage,correctPage}};
   }
   // 상품별 수집 과정 근거를 기록합니다. 같은 업체 상품을 하나로 묶더라도 사유는 보존합니다.
   function addAuditRow(item,keyword,page,source,decision){
@@ -1374,7 +1379,7 @@
   function recordScanAudit(audit,scan={},keyword,page){
     Object.assign(audit,{scanRepresentativeCandidates:scan.representativeCandidates||0,scanRepresentativeNoProvider:scan.representativeNoProvider||0,scanRepresentativeNoProductId:scan.representativeNoProductId||0,
       scanRawUnique:scan.rawUnique||0,scanUnidentifiedUnique:scan.unidentifiedUnique||0,scanTerminationReason:scan.terminationReason||'current-screen',scanIncomplete:!!scan.incomplete,
-      scanLinkEvents:scan.linkEvents||0,scanNestedExcluded:scan.nestedExcludedEvents||0,scanAmbiguousCards:scan.ambiguousCardEvents||0,scanSamples:scan.scrollSamples||1,
+      scanLinkEvents:scan.linkEvents||0,scanNestedExcluded:scan.nestedExcludedEvents||0,scanAmbiguousCards:scan.ambiguousCardEvents||0,scanSamples:scan.scrollSamples||1,scanScrollTrace:scan.scrollTrace||[],
       scanLegacyWideUnique:scan.legacyWideUnique||0,scanLegacySellerWideUnique:scan.legacySellerWideUnique||0,scanLegacyWideOnlyUnique:scan.legacyWideOnlyUnique||0,
       scanLegacyRejectedReasons:scan.legacyRejectedReasons||{},scanLegacyRejectedSamples:scan.legacyRejectedSamples||[],scanLegacySafeUnique:scan.legacySafeUnique||0,scanLegacyAmbiguousUnique:scan.legacyAmbiguousUnique||0,scanStrictUnique:scan.strictUnique||0,scanLegacyAddedUnique:scan.legacyAddedUnique||0});
     audit.scanCoverageUnverified=Array.isArray(scan.unresolvedCandidates)?scan.unresolvedCandidates.length:Math.max(0,audit.scanRepresentativeCandidates-(scan.reconciledRepresentativeCount??audit.scanRawUnique));
