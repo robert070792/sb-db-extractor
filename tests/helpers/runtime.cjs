@@ -42,13 +42,14 @@ async function runtime(options={}){
     prepareBusinessLookup,executePreparedBusinessLookup,normalizeCachedData,
     enrichStoreUrls:C.enrichStoreUrls,processPending,collect,collectPrice,collectPlus,loadScrollPage,
     expandCatalogsOnPage,inspectCatalogOffers,toNaverCatalogOffer,fetchCatalogOfferPage,recordScanAudit,reconcilePage,
-    pageEvidence,navigatePrice,ensureKeyword,waitForPricePageChange,runJob,flagSharedPhones,
+    pageEvidence,navigatePrice,reloadPricePage,inspectPriceDocument,ensureKeyword,waitForPricePageChange,runJob,flagSharedPhones,
     getState,lookupAlreadyRequested,recordLookupRequest,finishLookupRequest,
     get state(){return state;},get ledger(){return lookupLedger;},get job(){return job;},
     setState(value){state={...blank(),...value,statistics:{...blankStats(),...(value.statistics||{})}};return state;},
     setJob(value={tabId:1,cancelled:false,paused:false}){job=value;return value;},
     override(deps){
       if(deps.inspect)inspect=deps.inspect;
+      if(deps.inspectPriceDocument)inspectPriceDocument=deps.inspectPriceDocument;
       if(deps.inspectPager)inspectPager=deps.inspectPager;
       if(deps.scrollTop)scrollTop=deps.scrollTop;
       if(deps.scroll)scroll=deps.scroll;

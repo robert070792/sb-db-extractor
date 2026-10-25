@@ -1,4 +1,4 @@
-/* 유승빈 DB추출기 v3.29: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
+/* 유승빈 DB추출기 v3.30: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
 (() => {
   'use strict';
   const KEY='sb_leads_v20_state'; // chrome.storage.local: 컴퓨터 + Chrome 프로필별, sync 사용 안 함
@@ -15,7 +15,7 @@
   const str=v=>String(v==null?'':v);
   const blankCatalogRequests=()=>({attempted:0,fetchInvoked:0,unconfirmed:0,legacyUncounted:false});
   const blankStats=()=>({filtered:0,duplicate:0,unknownReviews:0,unknownGroup:0,adsExcluded:0,sameSeller:0,invalidSeller:0,selected:0,checked:0,new:0,absent:0,rejected:0,paid:0,paymentScheduled:0,sameBranch:0,otherBranch:0,unknown:0,excluded:0,no010:0,businessDuplicates:0,lookupPrevented:0,bizCached:0,bizLatest:0,bizLegacy:0,bizErrors:0,bizUrlMissing:0,bizAuthErrors:0,bizUrlMissingAds:0,bizUrlMissingCatalogs:0,bizStoreRecovered:0,bizStoreConflicts:0,bizNoDetails:0});
-  const blank=()=>({runId:Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),pageTransitions:[],settings:{catalogLookup:false},catalogRequests:blankCatalogRequests(),basic:[],seen:[],lookupAttempted:[],businessIndex:{},statistics:blankStats(),pending:[],collection:null,running:false,paused:false,phase:'대기 중',stage:'',startedAt:0,finishedAt:0,processed:0,total:0,scanned:0,page:0,pageTotal:0,matched:[],review:[],logs:[],error:'',discovered:0,ads:0,keyword:'',source:'',mode:'',searchUrl:'',skipped:0,pageStats:[],auditPages:[],auditRows:[],auditTruncated:0,catalogDiagnostics:[],phoneDuplicates:0,currentStore:'',unidentifiedWarnings:0,unidentifiedUniqueCandidates:0,unidentifiedObservationCount:0,catalogWarnings:0,catalogExpanded:0,catalogBlockedReason:"",incompletePages:[],plusBatchSize:PLUS_BATCH});
+  const blank=()=>({runId:Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),pageTransitions:[],pageReloads:[],settings:{catalogLookup:false,reloadAfterPageChange:false},catalogRequests:blankCatalogRequests(),basic:[],seen:[],lookupAttempted:[],businessIndex:{},statistics:blankStats(),pending:[],collection:null,running:false,paused:false,phase:'대기 중',stage:'',startedAt:0,finishedAt:0,processed:0,total:0,scanned:0,page:0,pageTotal:0,matched:[],review:[],logs:[],error:'',discovered:0,ads:0,keyword:'',source:'',mode:'',searchUrl:'',skipped:0,pageStats:[],auditPages:[],auditRows:[],auditTruncated:0,catalogDiagnostics:[],phoneDuplicates:0,currentStore:'',unidentifiedWarnings:0,unidentifiedUniqueCandidates:0,unidentifiedObservationCount:0,catalogWarnings:0,catalogExpanded:0,catalogBlockedReason:"",incompletePages:[],plusBatchSize:PLUS_BATCH});
   let state=null,job=null,lookupLedger={},rememberedStores={},storeSaveQueue=Promise.resolve();
   function sourceUrl(raw){
     try{const u=new URL(raw);if(u.origin!==SHOP_ORIGIN||!u.searchParams.get('query'))return null;
@@ -31,6 +31,7 @@
       // 이전 버전의 이어하기는 당시 조회 켜짐을 유지하고, 새 작업은 명시적으로 선택합니다.
       const legacyCatalog=typeof saved.settings?.catalogLookup!=='boolean'&&!!(saved.startedAt||saved.collection||saved.pending?.length);
       state.settings={...state.settings,catalogLookup:legacyCatalog?true:state.settings.catalogLookup===true};
+      state.settings.reloadAfterPageChange=state.settings.reloadAfterPageChange===true;
       state.catalogRequests=saved.catalogRequests||{...blankCatalogRequests(),legacyUncounted:legacyCatalog};
       state.seen=[...new Set((state.seen||[]).map(str))];
       state.lookupAttempted=[...new Set((state.lookupAttempted||[]).map(str))];
@@ -1067,8 +1068,102 @@
     c.pageWait={...attempt,page:attempt.targetPage,label:`${attempt.keyword} ${attempt.targetPage}페이지 (수집 확인 대기)`,reason:'페이지 전환 확인 중',failedAt:null};
     await save();assertActive(j);
   }
+  async function inspectPriceDocument(tabId){
+    const result=await chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:()=>{
+      const u=new URL(location.href);
+      return {timeOrigin:performance.timeOrigin,origin:u.origin,path:u.pathname,keyword:u.searchParams.get('query')||'',page:Number(u.searchParams.get('pagingIndex')||1)};
+    }});
+    return result?.[0]?.result;
+  }
+  async function saveReloadPlan(j,plan){
+    assertActive(j);
+    state.pageReloads=state.pageReloads||[];
+    const index=state.pageReloads.findIndex(x=>x.id===plan.id);
+    const snapshot=JSON.parse(JSON.stringify(plan));
+    if(index<0)state.pageReloads.push(snapshot);else state.pageReloads[index]=snapshot;
+    state.pageReloads=state.pageReloads.slice(-100);
+    await save();assertActive(j);
+  }
+  async function waitForReloadDocument(j,tabId,keyword,plan){
+    const deadline=Date.now()+30000;
+    while(Date.now()<deadline){
+      await waitIfPaused(j);await pause(650);assertActive(j);
+      let tab,doc;try{tab=await chrome.tabs.get(tabId);if(tab.status!=='complete')continue;doc=await inspectPriceDocument(tabId);}catch{continue;}
+      if(!Number.isFinite(doc?.timeOrigin)||doc.timeOrigin===plan.beforeDocument)continue;
+      if(doc.origin!==SHOP_ORIGIN||!/^\/search\//.test(doc.path)||doc.keyword!==keyword)throw Error('새로고침 후 검색 화면 또는 검색어가 달라졌습니다. 원래 검색 화면을 확인한 뒤 이어하기를 누르세요.');
+      return doc;
+    }
+    throw Error('새로고침 완료를 확인하지 못했습니다. 자동 새로고침은 반복하지 않습니다. 화면을 확인한 뒤 이어하기를 누르세요.');
+  }
+  async function waitForReloadProducts(j,tabId,keyword){
+    const deadline=Date.now()+30000;let previous='',stable=0;
+    while(Date.now()<deadline){
+      await waitIfPaused(j);await pause(650);assertActive(j);
+      let data,pager;try{[data,pager]=await Promise.all([inspect(tabId),inspectPager(tabId)]);}catch{continue;}
+      if(data?.challenge)throw Error('새로고침 후 네이버 보안 확인이 필요합니다. 화면에서 직접 확인한 뒤 이어하기를 누르세요.');
+      let query='';try{query=new URL(data?.url||'').searchParams.get('query')||'';}catch{}
+      const actual=pager?.domCurrent;
+      if(query!==keyword||!Number.isInteger(actual)||pager.urlPage!==actual||data.loading||!data.records?.length){stable=0;continue;}
+      try{requireScrollPage(data,pager,actual);}catch{stable=0;continue;}
+      const tagged=data.records.filter(x=>Number.isInteger(x.observedPage));
+      if(tagged.length<Math.min(3,data.records.length)){stable=0;continue;}
+      const signature=productSignature(data),fingerprint=actual+':'+signature;
+      stable=fingerprint===previous?stable+1:1;previous=fingerprint;
+      if(stable>=2)return {actual,data,pager};
+    }
+    throw Error('새로고침 후 실제 페이지 번호·상품 로딩을 확인하지 못했습니다. 수집을 멈추고 화면 확인을 기다립니다.');
+  }
+  async function reloadPricePage(j,tabId,keyword,targetPage,reason){
+    const c=state.collection;if(!c)throw Error('새로고침 전에 저장할 수집 상태가 없습니다.');
+    let plan=c.reloadPlan;
+    if(!plan||plan.keyword!==keyword||plan.targetPage!==targetPage){
+      const doc=await inspectPriceDocument(tabId);assertActive(j);
+      if(!Number.isFinite(doc?.timeOrigin))throw Error('새로고침 전 문서 정보를 확인하지 못했습니다.');
+      plan=c.reloadPlan={id:state.runId+':'+c.keywordIndex+':'+targetPage,keyword,targetPage,fromPage:j.navigationAttempt?.fromPage??null,
+        beforeDocument:doc.timeOrigin,beforeUrlPage:doc.page,reason,phase:'reload-reserved',reloadCount:1,reclickIssued:false,requestedAt:Date.now()};
+      // Reserve before reloading so a worker restart cannot trigger an unbounded reload loop.
+      await saveReloadPlan(j,plan);await waitIfPaused(j);
+      await patch(j,{stage:`${targetPage}페이지 이동 후 현재 탭 새로고침 · 진행 상태 저장됨`});
+      await log(j,`${keyword} ${targetPage}페이지 · 현재 주소 그대로 새로고침 1회 (${reason})`);
+      assertActive(j);await chrome.tabs.reload(tabId);
+    }
+    try{
+      const doc=await waitForReloadDocument(j,tabId,keyword,plan);
+      if(plan.reclickIssued&&doc.timeOrigin===plan.loadedDocument&&plan.phase!=='verified'){
+        // A restart after re-click must verify the existing request, never click/reload again.
+        j.navigationAttempt={keyword,targetPage,fromPage:plan.retryFromPage,beforeEvidence:plan.retryBaseline};
+        const after=await waitForPricePageChange(j,tabId,targetPage,plan.retryBaseline,plan.retryFromPage,15000);
+        plan.phase='verified';plan.verifiedPage=after.actual;await saveReloadPlan(j,plan);return after;
+      }
+      const ready=await waitForReloadProducts(j,tabId,keyword);
+      plan.loadedDocument=doc.timeOrigin;plan.loadedPage=ready.actual;
+      if(ready.actual===targetPage){
+        plan.phase='verified';plan.verifiedPage=targetPage;
+        j.pageProof={page:targetPage,reloadProof:true,lifecycleProof:true,signature:productSignature(ready.data),requests:pageEvidence(ready.data).requests};
+        await saveReloadPlan(j,plan);await log(j,`${keyword} ${targetPage}페이지 · 새 문서·페이지 번호·상품 확인 완료`);
+        return {...ready,proof:'새로고침 후 실제 페이지·상품 확인'};
+      }
+      if(plan.reclickIssued)throw Error('새로고침 후 목표 페이지 재클릭은 이미 1회 실행했습니다. 실제 목표 페이지를 확인한 뒤 이어하기를 누르세요.');
+      const baseline=pageEvidence(ready.data);
+      plan.reclickIssued=true;plan.retryFromPage=ready.actual;plan.retryBaseline=baseline;plan.phase='reclick-reserved';
+      j.navigationAttempt={keyword,targetPage,fromPage:ready.actual,beforeEvidence:baseline};
+      await checkpointPriceNavigation(j);await saveReloadPlan(j,plan);
+      await log(j,`${keyword} · 새로고침 후 ${ready.actual}페이지로 복원됨 · 실제 ${targetPage}페이지 버튼 1회 재클릭`);
+      const clicked=await clickPage(tabId,targetPage,ready.actual,j);
+      if(!clicked?.ok)throw Object.assign(Error(clicked?.reason||'새로고침 후 목표 페이지 버튼을 확인하지 못했습니다.'),{clickFailure:clicked});
+      j.navigationDirection=clicked.navigation;
+      const after=await waitForPricePageChange(j,tabId,clicked.clickedPage,baseline,ready.actual,15000);
+      if(after.actual!==targetPage)throw Error(`새로고침 후 목표 ${targetPage}페이지 대신 ${after.actual}페이지가 표시됐습니다. 화면을 확인하세요.`);
+      plan.phase='verified';plan.verifiedPage=after.actual;await saveReloadPlan(j,plan);return after;
+    }catch(error){
+      assertActive(j);plan.lastError=String(error.message||error).slice(0,1000);await saveReloadPlan(j,plan);throw error;
+    }
+  }
   async function navigatePrice(j,tabId,keyword,targetPage){
     assertActive(j);await waitIfPaused(j);
+    if(state.settings.reloadAfterPageChange&&state.collection?.reloadPlan?.keyword===keyword&&state.collection.reloadPlan.targetPage===targetPage){
+      await reloadPricePage(j,tabId,keyword,targetPage,'저장된 새로고침 이어하기');return;
+    }
     await ensureKeyword(j,tabId,keyword);
     let pager=await inspectPager(tabId),actual=pager?.domCurrent??null;
     await log(j,`${keyword} · 현재 페이지 ${actual??'미확인'} (실제 링크 ${pager?.domCurrent??'-'}, URL ${pager?.urlPage??'-'}) · 목표 ${targetPage}페이지`);
@@ -1077,7 +1172,9 @@
       // 실패 때 바뀐 숫자/pgn만 보고 이어하기가 이전 상품을 확정하는 것을 방지합니다.
       if(!waiting.beforeEvidence?.signature||waiting.fromPage===targetPage)throw Error('상품 변경 비교 기준이 없습니다. 실제 다른 페이지 버튼을 누른 뒤 이어하기를 누르세요.');
       j.navigationAttempt={keyword,targetPage,fromPage:waiting.fromPage,beforeEvidence:waiting.beforeEvidence};
-      await waitForPricePageChange(j,tabId,targetPage,waiting.beforeEvidence,waiting.fromPage,6000);
+      try{await waitForPricePageChange(j,tabId,targetPage,waiting.beforeEvidence,waiting.fromPage,6000);}
+      catch(error){if(!state.settings.reloadAfterPageChange)throw error;await reloadPricePage(j,tabId,keyword,targetPage,error.message);return;}
+      if(state.settings.reloadAfterPageChange)await reloadPricePage(j,tabId,keyword,targetPage,'페이지 이동 확인 후');
       return;
     }
     // URL만 있어도 현재 페이지라고 바로 확정하지 않습니다. DOM에서 명시적 확인된 경우에만 바로 수집.
@@ -1108,14 +1205,19 @@
       }
       await log(j,`${keyword} · ${clicked.clickedPage??(clicked.navigation==='prev'?'이전':'다음')}페이지 버튼 클릭${clicked.clickViewport?` · 화면 내 가림 없음 · ${clicked.clickViewport.waitedMs}ms 대기`:''}`);
       j.navigationDirection=clicked.navigation;
-      // 실패 후 왕복 클릭·스크롤 없이 저장한 위치에서 대기합니다.
-      const after=await waitForPricePageChange(j,tabId,clicked.clickedPage,signature,actual,15000);
+      // 새 작업은 이동 후 한 번 새로고침하며, 실패 시에도 저장된 횟수를 넘겨 재시도하지 않습니다.
+      let after;
+      try{after=await waitForPricePageChange(j,tabId,clicked.clickedPage,signature,actual,15000);}
+      catch(error){
+        if(!state.settings.reloadAfterPageChange||clicked.clickedPage!==targetPage)throw error;
+        await reloadPricePage(j,tabId,keyword,targetPage,error.message);return;
+      }
       pager=after.pager;let newly=after.actual;
       if(newly===null||newly===undefined)throw Error('이동 후 페이지 번호 확인 불가');
       if(actual!==null&&newly===actual)throw Error('페이지 버튼을 클릭했지만 페이지가 바뀌지 않았습니다.');
       actual=newly;
       await log(j,`${keyword} · ${actual}페이지 이동 확인 (${after.proof})`);
-      if(actual===targetPage){await patch(j,{stage:`${targetPage}페이지 확인 · 상품 수집`});return;}
+      if(actual===targetPage){if(state.settings.reloadAfterPageChange)await reloadPricePage(j,tabId,keyword,targetPage,'페이지 이동 확인 후');await patch(j,{stage:`${targetPage}페이지 확인 · 상품 수집`});return;}
     }
     throw Error(`${targetPage}페이지로 이동하지 못했습니다.`);
   }
@@ -1326,6 +1428,7 @@
       const newly=audit.added;
       if(c.products.length>MAX_ITEMS)throw Error(`상품 수집 한도 ${MAX_ITEMS}건을 초과했습니다. 페이지·키워드 범위를 줄이세요.`);
       c.previousSignature=previousSignature;c.nextPage=p+1;
+      if(c.reloadPlan?.keyword===keyword&&c.reloadPlan.targetPage===p)delete c.reloadPlan;
       if(c.pageWait?.keyword===keyword&&c.pageWait.page===p){
         state.incompletePages=state.incompletePages.filter(x=>x!==c.pageWait.label);delete c.pageWait;
       }
@@ -1701,7 +1804,7 @@
         const minReviews=Math.max(0,Number(raw.minReviews)||0);
         const maxReviews=raw.maxReviews===''||raw.maxReviews==null?null:Number(raw.maxReviews);
         if(maxReviews!==null&&(!Number.isFinite(maxReviews)||maxReviews<minReviews))throw Error('리뷰 최대값은 최소값 이상이어야 합니다.');
-        const settings={from,to,mode,keywords,minReviews,maxReviews,catalogLookup:raw.catalogLookup===true,lookupMode:'company',reviewsEnabled:!!raw.reviewsEnabled,grouped:raw.grouped==='exclude'?'exclude':'include',ads:['all','exclude','only'].includes(raw.ads)?raw.ads:'all',owner:str(raw.owner||'').trim().slice(0,40)};
+        const settings={from,to,mode,keywords,minReviews,maxReviews,catalogLookup:raw.catalogLookup===true,reloadAfterPageChange:src==='price'&&mode==='auto'&&raw.reloadAfterPageChange!==false,lookupMode:'company',reviewsEnabled:!!raw.reviewsEnabled,grouped:raw.grouped==='exclude'?'exclude':'include',ads:['all','exclude','only'].includes(raw.ads)?raw.ads:'all',owner:str(raw.owner||'').trim().slice(0,40)};
         const j={cancelled:false,paused:false,finishCollection:false,abort:null,tabId:sender.tab.id};job=j;
         reply({ok:true,accepted:true});
         void(async()=>{
@@ -1709,10 +1812,10 @@
             await getState();
             if(state.pending?.length||state.collection)throw Error('이전 작업이 남아 있습니다. 이어하기 또는 작업 초기화를 사용하세요.');
             await requireCompanyAccess();
-            Object.assign(state,{runId:Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),pageTransitions:[],seen:[],matched:[],review:[],businessIndex:{},statistics:blankStats(),skipped:0,basic:[],running:true,paused:false,startedAt:Date.now(),finishedAt:0,logs:[],phase:'요청 접수',stage:'현재 네이버 탭에서 수집 시작',keyword,source:src,mode,searchUrl,settings,pageTotal:mode==='auto'?(src==='plus'?0:to-from+1):1,error:'',pageStats:[],auditPages:[],auditRows:[],auditTruncated:0,catalogDiagnostics:[],phoneDuplicates:0,currentStore:'',unidentifiedWarnings:0,unidentifiedUniqueCandidates:0,unidentifiedObservationCount:0,catalogWarnings:0,catalogExpanded:0,catalogBlockedReason:"",catalogDiagnostics:[],incompletePages:[],total:0,processed:0});
+            Object.assign(state,{runId:Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),pageTransitions:[],pageReloads:[],seen:[],matched:[],review:[],businessIndex:{},statistics:blankStats(),skipped:0,basic:[],running:true,paused:false,startedAt:Date.now(),finishedAt:0,logs:[],phase:'요청 접수',stage:'현재 네이버 탭에서 수집 시작',keyword,source:src,mode,searchUrl,settings,pageTotal:mode==='auto'?(src==='plus'?0:to-from+1):1,error:'',pageStats:[],auditPages:[],auditRows:[],auditTruncated:0,catalogDiagnostics:[],phoneDuplicates:0,currentStore:'',unidentifiedWarnings:0,unidentifiedUniqueCandidates:0,unidentifiedObservationCount:0,catalogWarnings:0,catalogExpanded:0,catalogBlockedReason:"",catalogDiagnostics:[],incompletePages:[],total:0,processed:0});
             state.scanned=0;state.discovered=0;state.ads=0;state.page=0;state.catalogRequests=blankCatalogRequests();
             state.collection={source:src,mode,searchUrl,from,to,keywords,keywordIndex:0,nextPage:from,previousSignature:'',products:[],catalogProcessed:{},tabId:sender.tab.id};
-            await save();await log(j,`원부 추가 조회 ${settings.catalogLookup?'켜짐':'꺼짐'} · 이 작업의 고정 설정`);await log(j,`${src==='plus'?'플러스스토어':'가격비교'} '${keywords.join(', ')}' ${mode==='auto'?(src==='plus'?`연속 스크롤 (${PLUS_BATCH}개마다 저장, 수집 종료 버튼까지)`:`${from}~${to}페이지 번호 클릭 추출`):'현재 화면 추출'} 시작 · 새 탭 생성 없음`);
+            await save();if(settings.reloadAfterPageChange)await log(j,'페이지 이동 후 새로고침 사용 · 목표 페이지마다 최대 1회 · 현재 주소 유지');await log(j,`원부 추가 조회 ${settings.catalogLookup?'켜짐':'꺼짐'} · 이 작업의 고정 설정`);await log(j,`${src==='plus'?'플러스스토어':'가격비교'} '${keywords.join(', ')}' ${mode==='auto'?(src==='plus'?`연속 스크롤 (${PLUS_BATCH}개마다 저장, 수집 종료 버튼까지)`:`${from}~${to}페이지 번호 클릭 추출`):'현재 화면 추출'} 시작 · 새 탭 생성 없음`);
             await runJob(j);
           }catch(e){if(job===j){state.running=false;state.phase='시작 실패';state.error=str(e.message||e);await save();job=null;}}
         })();
