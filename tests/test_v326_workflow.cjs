@@ -11,7 +11,7 @@ for(const status of [418,403,429,500])test(`HTTP ${status} stops at the first ob
  e.api.setState({running:true,collection:c});
  e.api.override({inspect:async()=>listing(page,page===2?[req(status)]:[]),inspectPager:async()=>({domCurrent:page,urlPage:1}),scrollFooter:async()=>scrolls.push('before-click-footer'),scrollTop:async()=>scrolls.push('top'),scroll:async()=>scrolls.push('down'),clickPage:async(_,p)=>{page=p;clicks.push(p);return {ok:true,clickedPage:p};}});
  await e.api.runJob(e.api.setJob());
- assert.deepEqual(clicks,[2]);assert.deepEqual(scrolls,['before-click-footer']);assert(ms<2500);
+ assert.deepEqual(clicks,[2]);assert.deepEqual(scrolls,[]);assert(ms<2500);
  assert.equal(e.api.state.phase,'페이지 확인 대기');assert.match(e.api.state.stage,new RegExp('HTTP '+status));assert.equal(c.nextPage,2);assert.equal(c.keywordIndex,0);assert.equal(c.products.length,3);
  assert.equal(c.pageWait.requestFailure.status,status);assert.equal(e.requests.length,0);assert.equal(e.api.state.pageTransitions[0].result,'request-error');
 });

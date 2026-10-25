@@ -38,7 +38,7 @@ async function runtime(options={}){
   // Test-only exports and a deterministic clock; shipped source is evaluated otherwise unchanged.
   const exports=`
   globalThis.testApi={
-    inspectOpenedStore,rememberOpenedStore,storeHints,inspectProducts,inspectPricePagination,clickPricePagination,performPriceKeywordSearch,
+    inspectOpenedStore,rememberOpenedStore,storeHints,inspectProducts,inspectPricePagination,clickPricePagination,clickPage,performPriceKeywordSearch,
     prepareBusinessLookup,executePreparedBusinessLookup,normalizeCachedData,
     enrichStoreUrls:C.enrichStoreUrls,processPending,collect,collectPrice,collectPlus,loadScrollPage,
     expandCatalogsOnPage,inspectCatalogOffers,toNaverCatalogOffer,fetchCatalogOfferPage,recordScanAudit,reconcilePage,

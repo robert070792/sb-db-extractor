@@ -3,7 +3,18 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {JSDOM}=require('jsdom');
 const {runtime,item,response}=require('./helpers/runtime.cjs');
 const storeKey='sb_verified_store_links_v323';
-const call=(w,fn,...args)=>w.eval(`(${fn.toString()})`)(...args);
+const call=(w,fn,...args)=>{
+ const run=w.eval('('+fn.toString()+')');
+ if(fn.name==='clickPricePagination'){
+  // Model a visible, unobstructed button after the production preparation wait.
+  Object.defineProperty(w.document,'visibilityState',{configurable:true,value:'visible'});
+  w.HTMLElement.prototype.scrollIntoView=function(){this.getBoundingClientRect=()=>({width:100,height:30,left:100,top:100,right:200,bottom:130});};
+  const ready=run(...args,true);if(!ready.ok)return ready;
+  const prepared=w.__sbPagerPrepared328;prepared.at-=650;
+  w.document.elementFromPoint=()=>prepared.el;
+ }
+ return run(...args);
+};
 const pairs=x=>JSON.stringify(Object.entries(x).map(([key,value])=>({key,value})));
 function page(url='https://search.shopping.naver.com/search/all?query=test&pagingIndex=3'){
  const d=new JSDOM('<div id="list"></div><div class="pagination_pagination_fixture"><div class="pagination_num_fixture"></div></div>',{url,runScripts:'outside-only'});

@@ -1,0 +1,31 @@
+{
+  "version": "3.28",
+  "testFiles": 18,
+  "testUnits": 172,
+  "passed": 172,
+  "failed": 0,
+  "javascriptSyntaxFiles": 27,
+  "pythonSyntaxPassed": true,
+  "zipCRCValid": true,
+  "zipSourceBytesMatch": true,
+  "isolatedNpmCiPassed": true,
+  "isolatedZipTestsPassed": 172,
+  "olderArchivesUnchanged": [
+    "3.21",
+    "3.22",
+    "3.23",
+    "3.24",
+    "3.25",
+    "3.26",
+    "3.27"
+  ],
+  "sha256": "a3b19fb28e7c4a322971e736e8e7ba43a10ba0538966393541c43429437524c5",
+  "viewportClick": {
+    "prepareWaitMs": 650,
+    "blockedWhenObstructed": true,
+    "cancelDuringWaitVerified": true,
+    "numericAndPreviousButtonsVerified": true
+  },
+  "realNaverAndCompanyAPIVerified": false,
+  "naverHTTP418Resolved": false
+}

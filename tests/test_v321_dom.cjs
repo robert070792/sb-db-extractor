@@ -18,7 +18,18 @@ function productCard(w,{mall='100',product='111',mid='1000',store='expected',cha
     'data-nlog-params':JSON.stringify({is_ad:isAd,filter_con:{items:[{key:'pgn',value:'1'}]}})}))a.setAttribute(key,value);
   card.append(a);w.document.body.append(card);return a;
 }
-const call=(w,fn,...args)=>w.eval(`(${fn.toString()})`)(...args);
+const call=(w,fn,...args)=>{
+ const run=w.eval('('+fn.toString()+')');
+ if(fn.name==='clickPricePagination'){
+  // Model a visible, unobstructed button after the production preparation wait.
+  Object.defineProperty(w.document,'visibilityState',{configurable:true,value:'visible'});
+  w.HTMLElement.prototype.scrollIntoView=function(){this.getBoundingClientRect=()=>({width:100,height:30,left:100,top:100,right:200,bottom:130});};
+  const ready=run(...args,true);if(!ready.ok)return ready;
+  const prepared=w.__sbPagerPrepared328;prepared.at-=650;
+  w.document.elementFromPoint=()=>prepared.el;
+ }
+ return run(...args);
+};
 
 test('real search DOM: input events and magnifier click, never clear/expand/Enter',async()=>{
   const e=await runtime(),dom=page('<form><input data-focus-target="gnb-search-input"><button type="button" class="searchInput_button_clear_x" data-shp-area="GNB.del">X</button><button type="button" class="searchInput_button_arrow_x">expand</button><button type="button" class="searchInput_button_search_x" data-shp-area="GNB.search">search</button></form>'),w=dom.window;

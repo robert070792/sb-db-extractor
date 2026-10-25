@@ -5,7 +5,7 @@ test('unverified target page waits without automatic previous/target recovery cl
   e.api.override({scrollFooter:async()=>{footers++;},scrollTop:async()=>{throw Error('unexpected scroll');},inspectPager:async()=>({domCurrent:page}),inspect:async()=>({records:[item({observedPage:page,searchRequestId:'same'})]}),
     clickPage:async(_,next)=>{clicks.push(next);page=next;return {ok:true,clickedPage:next};}});
   await assert.rejects(()=>e.api.navigatePrice(j,1,'test',2),/페이지 이동 확인 실패/);
-  assert.deepEqual(clicks,[2]);assert.equal(footers,1);
+  assert.deepEqual(clicks,[2]);assert.equal(footers,0);
 });
 test('missing target button fails without recovery or scrolling on a different page',async()=>{
   const e=await runtime(),j=e.api.setJob();let clicks=0;

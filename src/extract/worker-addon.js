@@ -1,4 +1,4 @@
-/* 유승빈 DB추출기 v3.27: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
+/* 유승빈 DB추출기 v3.28: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
 (() => {
   'use strict';
   const KEY='sb_leads_v20_state'; // chrome.storage.local: 컴퓨터 + Chrome 프로필별, sync 사용 안 함
@@ -416,7 +416,7 @@
         }).slice(-10);
         const monitor=window.__sbSearchNetwork325;
         const requests=(monitor?.entries||[]).filter(x=>x.started>=watch.started).slice(-30).map(x=>({...x}));
-        lifecycle={fromPage:watch.fromPage,targetPage:watch.targetPage,navigation:watch.navigation,ageMs:age,
+        lifecycle={fromPage:watch.fromPage,targetPage:watch.targetPage,navigation:watch.navigation,clickViewport:watch.clickViewport||null,ageMs:age,
           requestMonitor:monitor?{fetch:monitor.fetch,xhr:monitor.xhr}:null,requests,
           productNodesAdded:watch.added,productNodesRemoved:watch.removed,organicAdded:watch.organicAdded,organicRemoved:watch.organicRemoved,quietMs:performance.now()-watch.lastMutation,responses};
       }
@@ -465,7 +465,7 @@
     return {current:domCurrent??urlPage,domCurrent,selected:domCurrent,urlPage,disagree,method:domCurrent!==null?method:'URL만 확인',confidence:domCurrent!==null?'high':urlPage!==null?'low':'none',numbers,href:location.href,groupFound:links.length>=1};
   }
   // 페이지 번호는 화면에 표시된 텍스트로만 선택. '이전/다음' 링크의 data-shp-contents-id를 읽지 않습니다.
-  function clickPricePagination(targetPage,fromPage){
+  function clickPricePagination(targetPage,fromPage,prepare=false){
     const visible=el=>{if(!el?.getBoundingClientRect)return false;const r=el.getBoundingClientRect(),st=getComputedStyle(el);return r.width>0&&r.height>0&&st.display!=='none'&&st.visibility!=='hidden';};
     const groups=[...document.querySelectorAll('[class*="pagination_num"]')].filter(visible).map(root=>({root,links:[...root.querySelectorAll('a[class*="pagination_btn_page"][data-shp-contents-type="pageNo"]')].filter(el=>visible(el)&&/^(?:[1-9]|10)$/.test((el.textContent||'').trim()))})).filter(g=>g.links.length>=1);
     groups.sort((a,b)=>b.links.length-a.links.length);
@@ -483,7 +483,29 @@
     if(!chosen)return {ok:false,reason:`${targetPage}페이지 또는 해당 방향의 실제 이동 버튼이 없습니다.`,available};
     // 클릭 전에 실제 페이지 번호 링크 주소를 보존합니다. 클릭 후 SPA가 링크 DOM을 교체할 수 있습니다.
     const linkHref=String(chosen.el.href||chosen.el.getAttribute('href')||'');
-    chosen.el.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});
+    const selection=[...(groups[0]?.root.querySelectorAll('[aria-current="page"],[aria-selected="true"],[class*="active"],[class*="current"],strong')||[])].map(el=>(el.textContent||'').trim()).join('|');
+    const rect=()=>{const r=chosen.el.getBoundingClientRect();return {left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height};};
+    if(prepare){
+      chosen.el.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});
+      const viewport=rect();
+      window.__sbPagerPrepared328={el:chosen.el,targetPage,fromPage,href:location.href,selection,viewport,at:performance.now()};
+      return {ok:true,prepared:true,available,viewport};
+    }
+    const prepared=window.__sbPagerPrepared328;delete window.__sbPagerPrepared328;
+    const viewport=rect(),x=viewport.left+viewport.width/2,y=viewport.top+viewport.height/2;
+    const fail=reason=>({ok:false,reason,available,viewport});
+    if(!prepared||prepared.el!==chosen.el||prepared.targetPage!==targetPage||prepared.fromPage!==fromPage||prepared.href!==location.href||prepared.selection!==selection)
+      return fail('페이지 버튼 준비 상태가 바뀌었습니다. 화면을 확인한 뒤 이어하기를 누르세요.');
+    const waitedMs=Math.round(performance.now()-prepared.at);
+    if(waitedMs<600||waitedMs>5000)return fail('페이지 버튼 표시 대기가 완료되지 않았거나 만료됐습니다. 이어하기를 누르세요.');
+    if(document.visibilityState==='hidden')return fail('네이버 쇼핑 탭을 화면에 표시한 뒤 이어하기를 누르세요.');
+    if(!chosen.el.isConnected||!visible(chosen.el)||chosen.el.disabled||chosen.el.getAttribute('aria-disabled')==='true')return fail('페이지 버튼이 사라졌거나 비활성화됐습니다.');
+    if(![viewport.left,viewport.top,viewport.right,viewport.bottom].every(Number.isFinite)||viewport.left<0||viewport.top<0||viewport.right>innerWidth||viewport.bottom>innerHeight)
+      return fail('페이지 버튼이 화면 밖에 있어 클릭하지 않았습니다. 버튼을 화면에 표시한 뒤 이어하기를 누르세요.');
+    if(['left','top','right','bottom'].some(k=>Math.abs(viewport[k]-prepared.viewport[k])>2))return fail('페이지 버튼 위치가 바뀌어 클릭하지 않았습니다. 화면이 멈춘 뒤 이어하기를 누르세요.');
+    const hit=document.elementFromPoint(x,y);
+    if(!hit||!(hit===chosen.el||chosen.el.contains(hit)))return fail('페이지 버튼이 다른 창에 가려져 클릭하지 않았습니다. 추출기 창을 옮기거나 접은 뒤 이어하기를 누르세요.');
+    const clickViewport={...viewport,x,y,waitedMs,unobstructed:true};
     // 검색 요청만 관측합니다. 추가 요청이나 응답 본문/쿠키/헤더 읽기는 하지 않습니다.
     // fetch의 반환 Promise, XHR의 반환값과 예외는 원본 그대로 유지합니다.
     if(!window.__sbSearchNetwork325){
@@ -525,7 +547,7 @@
     // 제품 노드 교체만 관찰합니다. pgn 같은 추적 속성만 변경된 것은 상품 갱신 증거로 세지 않습니다.
     window.__sbPageWatch323?.observer?.disconnect();
     const clock=()=>typeof performance!=='undefined'?performance.now():Date.now();
-    const watch={fromPage,targetPage:chosen.page,navigation,started:clock(),lastMutation:clock(),added:0,removed:0,organicAdded:0,organicRemoved:0};
+    const watch={fromPage,targetPage:chosen.page,navigation,clickViewport,started:clock(),lastMutation:clock(),added:0,removed:0,organicAdded:0,organicRemoved:0};
     if(typeof MutationObserver!=='undefined'){
       const shown=node=>{for(let el=node;el?.nodeType===1;el=el.parentElement){const st=getComputedStyle(el);if(el.hidden||el.getAttribute('aria-hidden')==='true'||st.display==='none'||st.visibility==='hidden'||st.contentVisibility==='hidden')return false;}return true;};
       const count=(node,organic=false)=>{
@@ -542,7 +564,7 @@
     }
     window.__sbPageWatch323=watch;
     chosen.el.click();
-    return {ok:true,clickedPage:chosen.page,navigation,available,linkHref};
+    return {ok:true,clickedPage:chosen.page,navigation,available,linkHref,clickViewport};
   }
   async function performPriceKeywordSearch(keyword,method='button'){
     // React 입력값과 DOM 입력값이 어긋난 상태에서 빈 문자열로 검색되지 않도록
@@ -861,7 +883,11 @@
       products:rows.slice(0,150).map(x=>({seller:x.mallSeq,product:x.chnlProdNo||x.nvMid,isAd:!!x.isAd,page:x.observedPage,request:x.searchRequestId||''}))};
   }
   function productSignature(data){return (data?.records||[]).map(x=>x.mallSeq+':'+(x.chnlProdNo||x.nvMid)).sort().join('|');}
-  async function clickPage(tabId,page,currentPage){
+  async function clickPage(tabId,page,currentPage,j){
+    const prepared=await chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:clickPricePagination,args:[page,currentPage,true]});
+    if(!prepared?.[0]?.result?.ok)return prepared?.[0]?.result;
+    await pause(650);
+    if(j){assertActive(j);await waitIfPaused(j);}
     const r=await chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:clickPricePagination,args:[page,currentPage]});
     return r?.[0]?.result;
   }
@@ -1053,10 +1079,9 @@
       j.navigationAttempt={keyword,targetPage,fromPage:actual,beforeEvidence:signature};
       await checkpointPriceNavigation(j);
       await patch(j,{stage:`현재 ${actual??'미확인'}페이지 → ${targetPage}페이지 버튼 이동 중`});
-      await scrollFooter(tabId);await pause(420);
-      const clicked=await clickPage(tabId,targetPage,actual);
-      if(!clicked?.ok)throw Error(`${targetPage}페이지 버튼을 찾지 못했습니다. 현재 ${actual??'미확인'}페이지, 보이는 번호 ${(clicked?.available||[]).join(', ')||'없음'}`);
-      await log(j,`${keyword} · ${clicked.clickedPage??(clicked.navigation==='prev'?'이전':'다음')}페이지 버튼 클릭`);
+      const clicked=await clickPage(tabId,targetPage,actual,j);
+      if(!clicked?.ok)throw Error(clicked?.reason||`${targetPage}페이지 버튼을 찾지 못했습니다. 현재 ${actual??'미확인'}페이지, 보이는 번호 ${(clicked?.available||[]).join(', ')||'없음'}`);
+      await log(j,`${keyword} · ${clicked.clickedPage??(clicked.navigation==='prev'?'이전':'다음')}페이지 버튼 클릭${clicked.clickViewport?` · 화면 내 가림 없음 · ${clicked.clickViewport.waitedMs}ms 대기`:''}`);
       j.navigationDirection=clicked.navigation;
       // 실패 후 왕복 클릭·스크롤 없이 저장한 위치에서 대기합니다.
       const after=await waitForPricePageChange(j,tabId,clicked.clickedPage,signature,actual,15000);

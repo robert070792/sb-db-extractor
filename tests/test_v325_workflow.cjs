@@ -66,7 +66,18 @@ test('new job resets preceding run counters and records requested range',async()
  assert.equal((await e.send('sb:start',{mode:'auto',from:1,to:3,settings:{}},{tab:{id:1,url}})).ok,true);await settled(e);
  assert.equal(e.api.state.scanned,0);assert.equal(e.api.state.discovered,0);assert.equal(e.api.state.ads,0);assert.equal(e.api.state.settings.to,3);assert.equal(e.api.state.phase,'페이지 확인 대기');
 });
-const call=(w,fn,...args)=>w.eval('('+fn.toString()+')')(...args);
+const call=(w,fn,...args)=>{
+ const run=w.eval('('+fn.toString()+')');
+ if(fn.name==='clickPricePagination'){
+  // Model a visible, unobstructed button after the production preparation wait.
+  Object.defineProperty(w.document,'visibilityState',{configurable:true,value:'visible'});
+  w.HTMLElement.prototype.scrollIntoView=function(){this.getBoundingClientRect=()=>({width:100,height:30,left:100,top:100,right:200,bottom:130});};
+  const ready=run(...args,true);if(!ready.ok)return ready;
+  const prepared=w.__sbPagerPrepared328;prepared.at-=650;
+  w.document.elementFromPoint=()=>prepared.el;
+ }
+ return run(...args);
+};
 function page(){
  const d=new JSDOM('<div class="pagination_num_fixture"><strong aria-current="page">1</strong><a href="#" class="pagination_btn_page_fixture" data-shp-contents-type="pageNo">2</a></div>',{url,runScripts:'outside-only'}),w=d.window;
  w.HTMLElement.prototype.getBoundingClientRect=()=>({width:100,height:30});w.HTMLElement.prototype.scrollIntoView=()=>{};
