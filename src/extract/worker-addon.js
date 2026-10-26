@@ -1,11 +1,11 @@
-/* 유승빈 DB추출기 v3.32: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
+/* 유승빈 DB추출기 v3.33: 실제 버튼 이동, 식별 충돌 보류, 과금 이력 보존, 수집 완전성 진단 */
 (() => {
   'use strict';
   const KEY='sb_leads_v20_state'; // chrome.storage.local: 컴퓨터 + Chrome 프로필별, sync 사용 안 함
   const LEDGER_KEY='sb_paid_lookup_ledger_v321'; // 작업 초기화와 독립된 과금 가능 요청 이력
   const STORE_MAP_KEY='sb_verified_store_links_v323';
   const SHOP_ORIGIN='https://search.shopping.naver.com';
-  const MAX_PAGES=10, MAX_STORES=1200, MAX_ITEMS=12000, SCROLL_DELAY=390, PLUS_BATCH=60;
+  const MAX_PAGES=10, MAX_STORES=1200, MAX_ITEMS=12000, SCROLL_DELAY=800, PLUS_BATCH=60;
   const C=SBCore;
   // 사용자가 직접 연 상품에서 확인: brand.naver.com/basictone/products/6149475814 (mallSeq 362714).
   // 사용자 제공 실제 상품 URL과 광고의 mallSeq로 확인된 매핑만 사용. 표시명으로 추측하지 않음.
@@ -441,7 +441,7 @@
       rawKeys:[...rawKeys].slice(0,2000),unidentifiedKeys:[...unidentifiedKeys].slice(0,500),challenge,scrollY:Math.round(window.scrollY),scrollHeight:document.scrollingElement?.scrollHeight||document.body?.scrollHeight||0,viewHeight:window.innerHeight,url:location.href};
   }
   function resetScrollToTop(){window.scrollTo({top:0,behavior:"instant"});return {y:Math.round(window.scrollY)};}
-  function doScroll(){const el=document.scrollingElement||document.documentElement;const y=Math.min(el.scrollHeight,window.scrollY+Math.max(420,Math.round(window.innerHeight*.94)));window.scrollTo({top:y,behavior:'instant'});return {scrollY:Math.round(window.scrollY),scrollHeight:el.scrollHeight,viewHeight:window.innerHeight};}
+  function doScroll(){const el=document.scrollingElement||document.documentElement;const y=Math.min(el.scrollHeight,window.scrollY+Math.max(200,Math.round(window.innerHeight*.5)));window.scrollTo({top:y,behavior:'instant'});return {scrollY:Math.round(window.scrollY),scrollHeight:el.scrollHeight,viewHeight:window.innerHeight};}
   // 가격비교 하단 페이지네이션의 선택 상태를 URL과 별도로 확인합니다.
   // executeScript로 전달하므로 모든 DOM 탐색은 이 함수 안에서 독립적으로 실행합니다.
   // 실제 페이지네이션 그룹만 식별합니다. 전역 nav(탭 메뉴/필터의 'on' 클래스)는 제외합니다.
@@ -1209,13 +1209,26 @@
   }
   async function navigatePrice(j,tabId,keyword,targetPage){
     assertActive(j);await waitIfPaused(j);
-    if(state.settings.reloadAfterPageChange&&state.collection?.reloadPlan?.keyword===keyword&&state.collection.reloadPlan.targetPage===targetPage){
+    if(!state.settings.manualPageNavigation&&state.settings.reloadAfterPageChange&&state.collection?.reloadPlan?.keyword===keyword&&state.collection.reloadPlan.targetPage===targetPage){
       await reloadPricePage(j,tabId,keyword,targetPage,'저장된 새로고침 이어하기');return;
     }
     await ensureKeyword(j,tabId,keyword);
     let pager=await inspectPager(tabId),actual=pager?.domCurrent??null;
     await log(j,`${keyword} · 현재 페이지 ${actual??'미확인'} (실제 링크 ${pager?.domCurrent??'-'}, URL ${pager?.urlPage??'-'}) · 목표 ${targetPage}페이지`);
     const waiting=state.collection?.pageWait;
+    if(state.settings.manualPageNavigation===true&&(actual!==targetPage||waiting?.page===targetPage)){
+      const saved=waiting?.keyword===keyword&&waiting.page===targetPage&&waiting.beforeEvidence?.signature&&waiting.fromPage!==targetPage?waiting:null;
+      const before=saved?.beforeEvidence||pageEvidence(await inspect(tabId));
+      const from=saved?saved.fromPage:actual;
+      if(from===targetPage)throw Error('수동 이동 비교 기준이 없습니다. 다른 페이지로 이동한 뒤 이어하기를 누르세요.');
+      j.pageProof=null;j.navigationAttempt={keyword,targetPage,fromPage:from,beforeEvidence:before};
+      await checkpointPriceNavigation(j);
+      await patch(j,{phase:'페이지 직접 클릭 대기',stage:`아래의 실제 ${targetPage}페이지 버튼을 마우스로 눌러주세요. 상품 갱신 확인 후 자동 수집합니다. (최대 5분 대기)`});
+      await log(j,`${keyword} · ${targetPage}페이지 수동 클릭 대기 · 자동 클릭·새로고침 없음`);
+      await waitForPricePageChange(j,tabId,targetPage,before,from,300000);
+      await patch(j,{phase:`${keyword} · ${targetPage}페이지 수집`,stage:'직접 클릭한 페이지의 상품 갱신 확인 완료'});
+      return;
+    }
     if(waiting?.keyword===keyword&&waiting.page===targetPage&&actual===targetPage){
       // 실패 때 바뀐 숫자/pgn만 보고 이어하기가 이전 상품을 확정하는 것을 방지합니다.
       if(!waiting.beforeEvidence?.signature||waiting.fromPage===targetPage)throw Error('상품 변경 비교 기준이 없습니다. 실제 다른 페이지 버튼을 누른 뒤 이어하기를 누르세요.');
@@ -1826,6 +1839,19 @@
         j.waitingForPage=true;
         const page=state.collection?.nextPage;
         const waiting=state.collection?.pageWait;
+    if(state.settings.manualPageNavigation===true&&(actual!==targetPage||waiting?.page===targetPage)){
+      const saved=waiting?.keyword===keyword&&waiting.page===targetPage&&waiting.beforeEvidence?.signature&&waiting.fromPage!==targetPage?waiting:null;
+      const before=saved?.beforeEvidence||pageEvidence(await inspect(tabId));
+      const from=saved?saved.fromPage:actual;
+      if(from===targetPage)throw Error('수동 이동 비교 기준이 없습니다. 다른 페이지로 이동한 뒤 이어하기를 누르세요.');
+      j.pageProof=null;j.navigationAttempt={keyword,targetPage,fromPage:from,beforeEvidence:before};
+      await checkpointPriceNavigation(j);
+      await patch(j,{phase:'페이지 직접 클릭 대기',stage:`아래의 실제 ${targetPage}페이지 버튼을 마우스로 눌러주세요. 상품 갱신 확인 후 자동 수집합니다. (최대 5분 대기)`});
+      await log(j,`${keyword} · ${targetPage}페이지 수동 클릭 대기 · 자동 클릭·새로고침 없음`);
+      await waitForPricePageChange(j,tabId,targetPage,before,from,300000);
+      await patch(j,{phase:`${keyword} · ${targetPage}페이지 수집`,stage:'직접 클릭한 페이지의 상품 갱신 확인 완료'});
+      return;
+    }
         await patch(j,{phase:'페이지 확인 대기',error:'',stage:waiting?.reason||`${page}페이지 상품 갱신 미확인 · 스크롤 중지. 현재 네이버 화면의 상품 로딩을 확인한 뒤 이어하기를 누르세요.`,currentStore:''});
         return;
       }
@@ -1857,7 +1883,7 @@
         const minReviews=Math.max(0,Number(raw.minReviews)||0);
         const maxReviews=raw.maxReviews===''||raw.maxReviews==null?null:Number(raw.maxReviews);
         if(maxReviews!==null&&(!Number.isFinite(maxReviews)||maxReviews<minReviews))throw Error('리뷰 최대값은 최소값 이상이어야 합니다.');
-        const settings={from,to,mode,keywords,minReviews,maxReviews,catalogLookup:raw.catalogLookup===true,reloadAfterPageChange:src==='price'&&mode==='auto'&&raw.reloadAfterPageChange!==false,lookupMode:'company',reviewsEnabled:!!raw.reviewsEnabled,grouped:raw.grouped==='exclude'?'exclude':'include',ads:['all','exclude','only'].includes(raw.ads)?raw.ads:'all',owner:str(raw.owner||'').trim().slice(0,40)};
+        const settings={from,to,mode,keywords,minReviews,maxReviews,catalogLookup:raw.catalogLookup===true,manualPageNavigation:src==='price'&&mode==='auto'&&raw.manualPageNavigation===true,reloadAfterPageChange:src==='price'&&mode==='auto'&&raw.manualPageNavigation!==true&&raw.reloadAfterPageChange===true,lookupMode:'company',reviewsEnabled:!!raw.reviewsEnabled,grouped:raw.grouped==='exclude'?'exclude':'include',ads:['all','exclude','only'].includes(raw.ads)?raw.ads:'all',owner:str(raw.owner||'').trim().slice(0,40)};
         const j={cancelled:false,paused:false,finishCollection:false,abort:null,tabId:sender.tab.id};job=j;
         reply({ok:true,accepted:true});
         void(async()=>{

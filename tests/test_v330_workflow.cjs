@@ -84,11 +84,11 @@ test('button preparation failure does not trigger reload',async()=>{
  const {e,b}=await setup();e.api.override({clickPage:async()=>({ok:false,reason:'Synthetic covered button'})});
  await e.api.runJob(e.api.setJob());assert.equal(e.api.state.phase,'페이지 확인 대기');assert.deepEqual(b.reloads,[]);assert.deepEqual(b.collected,[1]);
 });
-test('new automatic jobs enable reload and old saved jobs retain their original behavior',async()=>{
+test('new jobs disable implicit reload and old saved jobs retain their original behavior',async()=>{
  const e=await runtime();e.api.override({navigatePrice:async()=>{throw Error('Synthetic wait');}});
  await e.send('sb:start',{mode:'auto',from:1,to:3,settings:{}},{tab:{id:1,url:url(1)}});
  for(let n=0;n<100&&e.api.job;n++)await new Promise(r=>setImmediate(r));
- assert.equal(e.api.state.settings.reloadAfterPageChange,true);
+ assert.equal(e.api.state.settings.reloadAfterPageChange,false);
  const old=await runtime({disk:{[workKey]:{settings:{catalogLookup:false},collection:{source:'price',mode:'auto',nextPage:2,products:[]}}}});
  assert.equal(old.api.state.settings.reloadAfterPageChange,false);
 });

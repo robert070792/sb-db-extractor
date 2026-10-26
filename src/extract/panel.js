@@ -1,15 +1,17 @@
-/* 유승빈 DB추출기 v3.32 - 기존 탭 재사용 / 사업자중복 / 로컬 이력 검색 결과 상단 UI */
+/* 유승빈 DB추출기 v3.33 - 기존 탭 재사용 / 사업자중복 / 로컬 이력 검색 결과 상단 UI */
 (()=>{
   if(document.getElementById('sb-leads-panel'))return;
   const root=document.createElement('section');root.id='sb-leads-panel';
   root.innerHTML=`
-    <div class="sb-header" id="sb-drag-handle" title="여기를 잡고 원하는 위치로 이동"><span class="sb-mark">SB</span><strong>유승빈 DB추출기</strong><small>v3.32</small><button id="sb-toggle" aria-label="패널 접기" title="접기">−</button></div>
+    <div class="sb-header" id="sb-drag-handle" title="여기를 잡고 원하는 위치로 이동"><span class="sb-mark">SB</span><strong>유승빈 DB추출기</strong><small>v3.33</small><button id="sb-toggle" aria-label="패널 접기" title="접기">−</button></div>
     <button id="sb-mini" type="button" title="유승빈 DB추출기 펼치기"><span class="sb-mini-mark">SB</span><span class="sb-mini-led"></span><span class="sb-mini-title">유승빈 DB추출기</span><span class="sb-mini-action">펼치기</span></button>
     <div id="sb-effect" class="sb-effect" aria-live="polite" aria-hidden="true"><span id="sb-effect-icon">✨</span><strong id="sb-effect-title">시작!</strong><span id="sb-effect-sub">추출 준비 중</span><div class="sb-confetti"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
     <div id="sb-body" class="sb-body">
       <div id="sb-site" class="sb-source">검색 결과를 확인하고 있어요.</div>
       <div id="sb-price-pages" class="sb-fields"><label>시작 페이지<input id="sb-from" type="number" min="1" max="10" value="1"></label><label>종료 페이지<input id="sb-to" type="number" min="1" max="10" value="10"></label></div>
       <div id="sb-page-note" class="sb-help"></div>
+      <label class="sb-check"><input id="sb-manual-page" type="checkbox" checked> 페이지 버튼 직접 누르기 (권장)</label>
+      <div class="sb-help">가격비교: 안내된 숫자 버튼을 직접 누르면 상품 갱신 확인 후 자동 수집합니다. 해제하면 자동 클릭합니다. 새 작업은 자동 새로고침을 사용하지 않습니다.</div>
 
       <label>담당자 이름 (직원별로 입력)<input id="sb-owner" type="text" maxlength="40" placeholder="담당자 이름"></label>
       <label>추출 키워드 (줄바꿈 또는 쉼표 구분, 최대 20개)<textarea id="sb-keywords" rows="3" placeholder="암막커튼&#10;쉬폰커튼"></textarea></label>
@@ -143,9 +145,12 @@
       if(s.settings?.maxReviews!=null)set('sb-maxreviews',s.settings.maxReviews);
       $('sb-reviewfilter').checked=!!s.settings?.reviewsEnabled;
       catalogDraft=s.settings?.catalogLookup===true;
+      $('sb-manual-page').checked=s.startedAt?s.settings?.manualPageNavigation===true:true;
       hydrated=true;
     }
     if(busy||s.collection||s.pending?.length)catalogDraft=s.settings?.catalogLookup===true;
+    $('sb-manual-page').disabled=busy||!!s.collection||!!s.pending?.length;
+    if(busy||s.collection||s.pending?.length)$('sb-manual-page').checked=s.settings?.manualPageNavigation===true;
     renderCatalogChoice();
     const cr=s.catalogRequests||{};
     $('sb-catalog-result').textContent=s.startedAt?`이 작업: ${s.settings?.catalogLookup?'켜짐':'꺼짐'} · 원부 요청 ${cr.fetchInvoked||0}회 · 전송 여부 미확인 ${cr.unconfirmed||0}회${cr.legacyUncounted?' · 이전 버전의 요청 횟수는 미집계':''}`:'새 작업 기본값: 꺼짐 · 시작 전에 선택하세요.';
@@ -195,7 +200,7 @@
     log(`${mode==='auto'?'전체 자동':'현재 화면'} 추출 클릭 · ${from}~${to}`);
     btn.textContent='시작 요청 중…';$('sb-phase').textContent='시작 요청 중';$('sb-stage').textContent='백그라운드 작업 등록 확인 중';
     $('sb-current').disabled=$('sb-auto').disabled=true;renderCatalogChoice();
-    try{const settings={catalogLookup:catalogDraft,owner:$('sb-owner').value,keywords:$('sb-keywords').value,minReviews:$('sb-minreviews').value,maxReviews:$('sb-maxreviews').value,reviewsEnabled:$('sb-reviewfilter').checked,grouped:$('sb-grouped').value,ads:$('sb-ads').value};await request({action:'sb:start',from,to,mode,settings},6500);log('시작 요청 접수 확인');await new Promise(r=>setTimeout(r,250));}
+    try{const settings={manualPageNavigation:$('sb-manual-page').checked,reloadAfterPageChange:false,catalogLookup:catalogDraft,owner:$('sb-owner').value,keywords:$('sb-keywords').value,minReviews:$('sb-minreviews').value,maxReviews:$('sb-maxreviews').value,reviewsEnabled:$('sb-reviewfilter').checked,grouped:$('sb-grouped').value,ads:$('sb-ads').value};await request({action:'sb:start',from,to,mode,settings},6500);log('시작 요청 접수 확인');await new Promise(r=>setTimeout(r,250));}
     catch(e){error(e);}
     finally{waiting=false;btn.textContent=mode==='auto'?'전체 자동 추출':'현재 화면 추출';void refresh();}
   }
@@ -222,7 +227,7 @@
   $('sb-download').onclick=()=>{saveCsv(snapshot?.matched||[],`유승빈 DB추출_${cleanName()}_${date()}.csv`,cols);log('영업관리표 16열 CSV 다운로드');};
   $('sb-review-download').onclick=()=>{saveCsv(snapshot?.review||[],`유승빈 DB추출_보류_${cleanName()}_${date()}.csv`,[['검색어','keyword'],['페이지','page'],['업체식별번호','mallSeq'],['네이버상품번호','nvMid'],['스토어명','storeName'],['상품명','productName'],['상품링크','productUrl'],['보류사유','reason'],['특이사항','memo'],['스토어주소','storeUrl'],['대표자','ceoName'],['확인된 연락처','phoneNumber'],['전체 연락처 후보','phoneCandidates'],['주소','address'],['원본 관측 상품주소','observedProductUrl'],['조회 경로','lookupOrigin'],['HTTP 상태','lookupHttpStatus'],['조회 API','lookupEndpoint'],['서버 오류','lookupServerMessage']]);log('확인 보류 CSV 다운로드');};
   $('sb-copyrows').onclick=async()=>{const rows=snapshot?.matched||[];const tsv=rows.map(r=>cols.map(c=>cell(r[c[1]]).replace(/[\t\r\n]+/g,' ')).join('\t')).join('\r\n');try{await navigator.clipboard.writeText(tsv);log(`영업관리표 행 ${rows.length}건 복사 완료(헤더 제외)`);alert(`${rows.length}개 행을 복사했어요. 스프레드시트의 첫 빈 행 첫 칸에 붙여넣으세요.`);}catch(e){error('클립보드 복사 실패: '+(e.message||e));}};
-  $('sb-copylog').onclick=async()=>{const data=[`유승빈 DB추출기 v3.32 (${new Date().toLocaleString('ko-KR')})`,`상태: ${$('sb-phase').textContent}`,...recentLogs,...(snapshot?.logs||[])].join('\n');try{await navigator.clipboard.writeText(data);log('진단 기록 복사 완료');}catch(e){error(e);}};
+  $('sb-copylog').onclick=async()=>{const data=[`유승빈 DB추출기 v3.33 (${new Date().toLocaleString('ko-KR')})`,`상태: ${$('sb-phase').textContent}`,...recentLogs,...(snapshot?.logs||[])].join('\n');try{await navigator.clipboard.writeText(data);log('진단 기록 복사 완료');}catch(e){error(e);}};
   // 통합 진단 패키지는 사용자가 직접 버튼을 누를 때만 생성됩니다.
   // 인증 쿠키, 토큰, 원시 HTTP 헤더, 사업자번호 인덱스는 포함하지 않습니다.
   function fullDiagnostic(){
@@ -231,7 +236,7 @@
       totals[key]=pages.reduce((v,p)=>v+(Number(p[key])||0),0);
     }
     return {
-      report:'유승빈 DB추출기 통합 진단',schema:'sb-diagnostic-v1',version:'3.32',
+      report:'유승빈 DB추출기 통합 진단',schema:'sb-diagnostic-v1',version:'3.33',
       exportedAt:new Date().toISOString(),searchPage:location.origin+location.pathname,keyword:s.keyword||currKeyword(),
       status:s.phase||'',stage:s.stage||'',startedAt:s.startedAt?new Date(s.startedAt).toISOString():null,
       finishedAt:s.finishedAt?new Date(s.finishedAt).toISOString():null,
@@ -251,7 +256,7 @@
   function saveDiagnosticFile(contents){
     const blob=new Blob(['\ufeff',contents],{type:'application/json;charset=utf-8'});
     const url=URL.createObjectURL(blob),a=document.createElement('a');
-    a.href=url;a.download=`유승빈_전체진단_${cleanName()}_${date()}_v3.32.json`;
+    a.href=url;a.download=`유승빈_전체진단_${cleanName()}_${date()}_v3.33.json`;
     document.documentElement.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);
   }
   $('sb-all-copy').onclick=async()=>{
